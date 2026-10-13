@@ -10,11 +10,6 @@
 # data/prepared/ and data/roles/ are committed (Git LFS), for the shortcut.
 data/raw/
 
-# Outputs that carry the dataset's labels or rows
-fit/out/test-predictions.ndjson
-fit/out/uploads.json
-eval_out/delivery/*.csv
-
 # Logs
 fit/out/*.log
 

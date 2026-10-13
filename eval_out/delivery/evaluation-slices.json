@@ -1,0 +1,48 @@
+{
+  "inc04": {
+    "tp": 584,
+    "fp": 62,
+    "fn": 23,
+    "tn": 1922,
+    "scored": 2591,
+    "invalid": 0,
+    "unmatched": 0,
+    "false_alarms": 45,
+    "normal_windows": 1922,
+    "detections": [
+      {
+        "rows": [
+          1024,
+          1630
+        ],
+        "length": 606,
+        "detected": true,
+        "n_windows": 601,
+        "latency": 54
+      }
+    ]
+  },
+  "inc07": {
+    "tp": 28,
+    "fp": 0,
+    "fn": 49,
+    "tn": 1984,
+    "scored": 2061,
+    "invalid": 0,
+    "unmatched": 0,
+    "false_alarms": 0,
+    "normal_windows": 1922,
+    "detections": [
+      {
+        "rows": [
+          1024,
+          1100
+        ],
+        "length": 76,
+        "detected": true,
+        "n_windows": 28,
+        "latency": 60
+      }
+    ]
+  }
+}

@@ -1,0 +1,84 @@
+{
+ "eval": "evl_5hckb5aj638qjbqt57vhzjvcgb",
+ "blueprint": {
+  "id": "blp_5kp46thexd8j2rwv2bzhawfffs",
+  "key": "red-pump-otr_3d03bz4fgs9frt6mr2ryng32cq",
+  "trial": "otr_3d03bz4fgs9frt6mr2ryng32cq",
+  "values": {
+   "background": "normal",
+   "data_columns": [
+    "sensor_02",
+    "sensor_03",
+    "sensor_04",
+    "sensor_05",
+    "sensor_10",
+    "sensor_11",
+    "sensor_12",
+    "sensor_38",
+    "sensor_41",
+    "sensor_42"
+   ],
+   "events": [
+    "normal",
+    "pump_breakdown"
+   ],
+   "step_size": 1,
+   "timestamp_column": "timestamp",
+   "window_size": 64,
+   "metric": "dot"
+  }
+ },
+ "optimization": "opt_4bmzpk1jnv8d2v9668jwsa8am2",
+ "platform": {
+  "accuracy": 0.9823246418414268,
+  "detection_precision": 0.9469953449005502,
+  "detection_recall": 0.9820076796489304,
+  "foreground_macro_f1": 0.9641837668982604,
+  "macro_f1": 0.9762255131885398
+ },
+ "confusion": {
+  "tp": 8951,
+  "fn": 164,
+  "fp": 501,
+  "tn": 28007
+ },
+ "abstained": 0,
+ "window_majority": {
+  "tp": 9004,
+  "fn": 115,
+  "fp": 448,
+  "tn": 28056,
+  "fault_f1": 0.9696839157826719,
+  "tie_windows": 8
+ },
+ "incidents": {
+  "inc04": {
+   "incident_rows": 606,
+   "detected": true,
+   "delay_samples": 54,
+   "false_alarms": 45,
+   "normal_windows": 7550
+  },
+  "inc05": {
+   "incident_rows": 8391,
+   "detected": true,
+   "delay_samples": 0,
+   "false_alarms": 324,
+   "normal_windows": 6320
+  },
+  "inc06": {
+   "incident_rows": 42,
+   "detected": false,
+   "delay_samples": null,
+   "false_alarms": 0,
+   "normal_windows": 6320
+  },
+  "inc07": {
+   "incident_rows": 76,
+   "detected": true,
+   "delay_samples": 60,
+   "false_alarms": 0,
+   "normal_windows": 8066
+  }
+ }
+}

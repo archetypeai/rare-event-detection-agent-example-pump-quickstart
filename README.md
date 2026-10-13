@@ -20,16 +20,17 @@
 
 | stage | what happens | time (measured 2026-10-13) |
 |---|---|---|
-| 0 | download the dataset (124 MB) from Kaggle | ⟨…⟩ |
+| 0 | download the dataset (12 MB zipped) from Kaggle | your connection |
 | 1a–1c | check the raw data, prepare it, check again | ~6 s |
 | 2–3 | build the files the platform receives, and check them | ~1 s |
-| 4 | **Optimize:** fit the prototypes, score 4 distance metrics on validation | ⟨…⟩ |
-| 5 | **promote** the best to a blueprint, **test** it once with the Evals API | ⟨…⟩ |
-| 6 | **deliver:** a bundle from that blueprint, run over the delivery files | ⟨…⟩ |
+| 4 | **Optimize:** fit the prototypes, score 4 distance metrics on validation | 3 min |
+| 5 | **promote** the best to a blueprint, **test** it once with the Evals API | 4 min |
+| 6 | **deliver:** a bundle from that blueprint, run over the delivery files | 1 min |
 | 7 | **score** the delivery against the held-back labels | seconds |
 
-  About **⟨…⟩ minutes** end to end, ⟨…⟩ of them on the platform. Platform times
-  vary with load.
+  About **10 minutes** end to end, 8 of them on the platform. Platform times
+  vary with load: the same agent runs went at ~4 windows a second that morning
+  and ~50 by the afternoon, which would make Stage 6 about 20 minutes.
 
 - **Skip the download:** Stage 1's prepared files and the role files are in the
   repo, in Git LFS. See [Shortcuts](#shortcuts-skip-the-download).
@@ -221,11 +222,20 @@ python3 fit/optimize.py
    classifier's only setting, the **distance metric**: `cosine`, `l1`, `l2` and
    `dot`. The four trials share one pass of the encoder.
 
-**Expect** `4 trial(s), searching ['metric']`, then the ranking. Ours:
+**Expect** `uploading 4 of 4 files (2.3 MB)`, `4 trial(s), searching ['metric']`,
+then the ranking. Ours:
 
 ```
-⟨…⟩
+otr_…  completed {"metric": "dot"}     foreground_macro_f1 0.8588  macro_f1 0.9161  detection_recall 0.9216  detection_precision 0.8040
+otr_…  completed {"metric": "cosine"}  foreground_macro_f1 0.8474  macro_f1 0.9091  detection_recall 0.9238  detection_precision 0.7826
+otr_…  completed {"metric": "l2"}      foreground_macro_f1 0.8400  macro_f1 0.9046  detection_recall 0.9238  detection_precision 0.7702
+otr_…  completed {"metric": "l1"}      foreground_macro_f1 0.8328  macro_f1 0.9001  detection_recall 0.9238  detection_precision 0.7581
 ```
+
+`dot` wins: of the 1,313 breakdown windows it catches 1,210 (recall 0.92), and
+four in five of its alarms are real (precision 0.80). The fault F1 is scored
+with each row counted once, which at one prediction per row means each window
+is labelled by its last row.
 
 Try others with `--new` and `--window` (a list, or `LOW:HIGH`), `--step`,
 `--metric`, `--trials`. **Writes:** `fit/out/optimize_<optimization id>.json`.
@@ -246,10 +256,26 @@ python3 fit/test.py
 **Expect** (ours):
 
 ```
-⟨…⟩
+eval evl_…  blueprint red-pump-otr_…  (window 64, step 1, dot; 0 abstained)
+  platform (each row once): fault F1 0.9642  macro-F1 0.9762  recall 0.9820  precision 0.9470
+  whole-window majority (as fit/evaluate_events.py): fault F1 0.9697  tp 9004 fp 448 fn 115 tn 28056
+  false alarms 369 / 28,256 = 0.0131 (windows with no fault row)
+    inc04    606 rows  +54 samples    false alarms   45 / 7,550
+    inc05  8,391 rows  +0 samples     false alarms  324 / 6,320
+    inc06     42 rows  MISSED         false alarms    0 / 6,320
+    inc07     76 rows  +60 samples    false alarms    0 / 8,066
 ```
 
-⟨…⟩
+- **Three of four unseen breakdowns caught**, from two labelled examples: the
+  5.8-day #5 on the first window that can show it, #4 54 minutes in, #7 an hour
+  in. **#6, 42 minutes long, is missed**, with no false alarm on its slice
+  either: too short to move a 64-minute window toward the breakdown prototype.
+- **False alarms: 1.31%** of the windows with no breakdown row, most of them
+  (324) in the days around #5.
+- **Two fault F1s, two labelling rules:** the platform's (each row once: 0.9642)
+  and the design rule's (each window by the majority of its rows: 0.9697).
+- **This is the one-shot test.** Once you have seen its number, the setting is
+  frozen: tuning it further would make the test number optimistic.
 
 **Writes:** `fit/out/test.json`, `fit/out/test-predictions.ndjson` and
 `fit/out/test_state.json` (the ids, so a rerun resumes instead of testing again).
@@ -267,7 +293,9 @@ python3 fit/deliver.py
 3. **Download** each output, again until it covers its input (a run can report
    `completed` while its output is still being written).
 
-**Expect** ⟨…⟩. **Writes:** `eval_out/delivery/red-output-*.csv` and
+**Expect:** `bundle bnd_… (ready) on red-pump-otr_…`, two `agent agt_…` lines,
+`inc04.csv: complete`, `inc07.csv: complete`, then Stage 7's scores. Each agent
+took about 45 seconds here. **Writes:** `eval_out/delivery/red-output-*.csv` and
 `fit/out/deliver_state.json`.
 
 ### Stage 7: score the delivery
@@ -286,22 +314,50 @@ and how many minutes after onset; false alarms on windows with no breakdown row.
 **Expect** (ours):
 
 ```
-⟨…⟩
+══ inc04  (2,591 scored, 0 invalid, 0 unmatched)
+   pump_breakdown  P 0.9040  R 0.9621  F1 0.9322  (n=607)
+   false alarms    45/1922 = 0.0234 (windows with zero fault rows)
+   incident rows 1024-1630 (len 606): DETECTED by 601 window(s), +54 samples after onset
+══ inc07  (2,061 scored, 0 invalid, 0 unmatched)
+   pump_breakdown  P 1.0000  R 0.3636  F1 0.5333  (n=77)
+   false alarms    0/1922 = 0.0000 (windows with zero fault rows)
+   incident rows 1024-1100 (len 76): DETECTED by 28 window(s), +60 samples after onset
+POOLED over 2 slices (4,652 windows)
+   pump_breakdown P 0.9080 R 0.8947 F1 0.9013
+   false alarms 45/3844 = 0.0117
+   incidents detected: 2/2
 ```
 
-⟨…⟩
+- **Both breakdowns caught, at the same minute as the test** (+54 and +60): the
+  agent runs and the Evals run give the same answers on the same rows.
+- **#7 is caught late and briefly:** 28 of its 77 breakdown windows, starting an
+  hour in. A 76-minute breakdown fills a 64-minute window only near its end.
+- **#4's 45 false alarms are the test's 45**, all within 1,024 rows of the
+  breakdown: the agent fires in the hours around it, not on quiet operation.
+  That is why the delivery's false-alarm rate (1.17%) is close to the test's
+  (1.31%) even with far less normal context.
 
 **Writes:** `eval_out/delivery/evaluation-slices.json`.
 
 ## Results
 
-⟨…⟩
+| stage | measure | ours |
+|---|---|---|
+| 1–3 | prepared and role files | byte-identical to the full example's; every role check passed |
+| 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8328: the full example's, to four decimals |
+| 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60): the full example's |
+| 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) |
+
+Prep, Optimize and Evals are deterministic here: this run, from fresh uploads,
+a new optimization and a new promoted blueprint, matches the full example's to
+the last digit. If yours differs, something differs in your data or setup, and
+the expected outputs above show at which stage.
 
 ## What's left out, compared with the full example
 
 | full example | here | why |
 |---|---|---|
-| delivery of all four test breakdowns and five weeks of normal operation after them | breakdowns #4 and #7, short context | time: agent runs score ~2 windows a second, ~11 h instead of ~20 min |
+| delivery of all four test breakdowns and five weeks of normal operation after them | breakdowns #4 and #7, short context | time: ~87,000 windows instead of ~4,700, hours of agent runs at the rates measured that day |
 | a 12-point search over windows 16–64, a check of 48 and 80, and a random search | the 4 metrics at window 64 | the window search found window 64 and cost more platform time; the winner is the same |
 | the first design: a local grid with Omega 1.5, `red-fitting`, an `s3://` classifier; a live on-device app | none | |
 
@@ -336,11 +392,17 @@ https://www.kaggle.com/datasets/nphantawee/pump-sensor-data. The uploader
 credits a friend's operations team, who look after the water pump of a small,
 remote area and shared the data so its failures could be understood.
 
-**No licence is declared** on the dataset, so there is no explicit grant to
-redistribute it or to use it commercially. The raw file is not in this repo:
-`prep/download.py` fetches it under Kaggle's terms with your own account.
-`data/prepared/` and `data/roles/` are derived from it (10 of the 52 channels,
-z-scored, cut into the files above, with labels from `machine_status`), so the
-same unknown licence reaches them: settle the redistribution question before
-publishing this repo, or remove them from its history. Treat the data as
-research and educational use only.
+| | |
+|---|---|
+| Title | `pump_sensor_data` |
+| Publisher | Kaggle user `nphantawee` |
+| Published | 2019-03-04 |
+| Contents | 220,320 rows, 52 raw sensor channels, 1-minute cadence, `machine_status` label |
+| Licence | none declared on the Kaggle dataset page |
+
+**What is in this repo:** not the raw file, which `prep/download.py` fetches
+from Kaggle with your own account. `data/prepared/` and `data/roles/` are
+derived from it: 10 of the 52 channels, gaps of up to 16 readings interpolated,
+z-scored with April's normal readings, cut into the files above, with a
+`label` from `machine_status` (`BROKEN` and `RECOVERING` as `pump_breakdown`).
+`eval_out/` and `fit/out/` hold this repo's run on them.
