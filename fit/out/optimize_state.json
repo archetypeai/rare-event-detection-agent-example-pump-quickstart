@@ -2,9 +2,9 @@
  "endpoint": "https://api.dev.u1.archetypeai.app",
  "runs": [
   {
-   "optimization": "opt_4bmzpk1jnv8d2v9668jwsa8am2",
+   "optimization": "opt_6cwsryjqsy81w9pjxmx1x4h14k",
    "request": {
-    "name": "red-pump 20261013T183237Z",
+    "name": "red-pump 20261013T184756Z",
     "blueprint_id": "blp_688t75n4558pea52rch2pwqj96",
     "primary": "event.foreground_macro_f1",
     "overrides": {

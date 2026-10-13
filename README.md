@@ -350,7 +350,9 @@ POOLED over 2 slices (4,652 windows)
 
 Prep, Optimize and Evals are deterministic here: this run, from fresh uploads,
 a new optimization and a new promoted blueprint, matches the full example's to
-the last digit. If yours differs, something differs in your data or setup, and
+the last digit. We ran Stages 4–7 twice from scratch; the second run's 37,623
+test predictions and both delivery outputs are byte-identical to the first's,
+and only the platform ids differ (`fit/out/` holds the second). If yours differs, something differs in your data or setup, and
 the expected outputs above show at which stage.
 
 ## What's left out, compared with the full example
