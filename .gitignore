@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Model weights
+*.safetensors
+
+# The raw file: prep/download.py fetches it from Kaggle with your own account.
+# data/prepared/ and data/roles/ are committed (Git LFS), for the shortcut.
+data/raw/
+
+# Outputs that carry the dataset's labels or rows
+fit/out/test-predictions.ndjson
+fit/out/uploads.json
+eval_out/delivery/*.csv
+
+# Logs
+fit/out/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+.DS_Store
+
+# Working notes, not part of the example
+plan.md

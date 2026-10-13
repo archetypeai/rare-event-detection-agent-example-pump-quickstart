@@ -1,0 +1,56 @@
+{
+ "endpoint": "https://api.dev.u1.archetypeai.app",
+ "runs": [
+  {
+   "optimization": "opt_4bmzpk1jnv8d2v9668jwsa8am2",
+   "request": {
+    "name": "red-pump 20261013T183237Z",
+    "blueprint_id": "blp_688t75n4558pea52rch2pwqj96",
+    "primary": "event.foreground_macro_f1",
+    "overrides": {
+     "values": {
+      "timestamp_column": "timestamp",
+      "data_columns": [
+       "sensor_02",
+       "sensor_03",
+       "sensor_04",
+       "sensor_05",
+       "sensor_10",
+       "sensor_11",
+       "sensor_12",
+       "sensor_38",
+       "sensor_41",
+       "sensor_42"
+      ],
+      "events": [
+       "normal",
+       "pump_breakdown"
+      ],
+      "background": "normal",
+      "window_size": 64,
+      "step_size": 1
+     }
+    },
+    "search_space": {
+     "parameters": {
+      "metric": {
+       "kind": "value",
+       "spec": {
+        "type": "categorical",
+        "values": [
+         "cosine",
+         "l1",
+         "l2",
+         "dot"
+        ]
+       }
+      }
+     }
+    },
+    "budget": {
+     "max_trials": 4
+    }
+   }
+  }
+ ]
+}

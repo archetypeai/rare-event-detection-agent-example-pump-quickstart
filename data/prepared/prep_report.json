@@ -1,0 +1,561 @@
+{
+  "raw_file": "data/raw/sensor.csv",
+  "raw_rows": 220320,
+  "cadence_seconds": 60,
+  "irregular_intervals": 0,
+  "timestamps_monotonic": true,
+  "classes": [
+    "normal",
+    "pump_breakdown"
+  ],
+  "incidents": [
+    {
+      "index": 1,
+      "rows": [
+        17155,
+        18100
+      ],
+      "n_rows": 945,
+      "start": "2018-04-12 21:55:00"
+    },
+    {
+      "index": 2,
+      "rows": [
+        24510,
+        27621
+      ],
+      "n_rows": 3111,
+      "start": "2018-04-18 00:30:00"
+    },
+    {
+      "index": 3,
+      "rows": [
+        69318,
+        70631
+      ],
+      "n_rows": 1313,
+      "start": "2018-05-19 03:18:00"
+    },
+    {
+      "index": 4,
+      "rows": [
+        77790,
+        78396
+      ],
+      "n_rows": 606,
+      "start": "2018-05-25 00:30:00"
+    },
+    {
+      "index": 5,
+      "rows": [
+        128040,
+        136431
+      ],
+      "n_rows": 8391,
+      "start": "2018-06-28 22:00:00"
+    },
+    {
+      "index": 6,
+      "rows": [
+        141131,
+        141173
+      ],
+      "n_rows": 42,
+      "start": "2018-07-08 00:11:00"
+    },
+    {
+      "index": 7,
+      "rows": [
+        166440,
+        166516
+      ],
+      "n_rows": 76,
+      "start": "2018-07-25 14:00:00"
+    }
+  ],
+  "shot_incidents": [
+    1,
+    2
+  ],
+  "optimization_incident": 3,
+  "held_out_incidents": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "channel_triage": {
+    "max_nan_fraction": 0.01,
+    "max_interp_run": 16,
+    "dropped_high_nan": [
+      "sensor_00",
+      "sensor_06",
+      "sensor_07",
+      "sensor_08",
+      "sensor_09",
+      "sensor_15",
+      "sensor_50",
+      "sensor_51"
+    ],
+    "dropped_long_nan_run": [
+      "sensor_01",
+      "sensor_29",
+      "sensor_30",
+      "sensor_32"
+    ],
+    "clean_channels": 40,
+    "nan_dropout_audit": {
+      "sensor_00": {
+        "nan_fraction": 0.0463,
+        "nan_rows": 10208,
+        "nan_rows_inside_incidents": 10194,
+        "share_of_nans_inside_incidents": 0.9986,
+        "share_of_incident_rows_nan": 0.7038,
+        "long_runs": [
+          [
+            17160,
+            18076
+          ],
+          [
+            24511,
+            27614
+          ],
+          [
+            69928,
+            70023
+          ],
+          [
+            128719,
+            134795
+          ]
+        ]
+      },
+      "sensor_06": {
+        "nan_fraction": 0.0218,
+        "nan_rows": 4798,
+        "nan_rows_inside_incidents": 4784,
+        "share_of_nans_inside_incidents": 0.9971,
+        "share_of_incident_rows_nan": 0.3303,
+        "long_runs": [
+          [
+            25629,
+            25823
+          ],
+          [
+            130216,
+            130459
+          ],
+          [
+            130527,
+            134826
+          ]
+        ]
+      },
+      "sensor_07": {
+        "nan_fraction": 0.0247,
+        "nan_rows": 5451,
+        "nan_rows_inside_incidents": 5437,
+        "share_of_nans_inside_incidents": 0.9974,
+        "share_of_incident_rows_nan": 0.3754,
+        "long_runs": [
+          [
+            25629,
+            25823
+          ],
+          [
+            69739,
+            70306
+          ],
+          [
+            130158,
+            134826
+          ]
+        ]
+      },
+      "sensor_08": {
+        "nan_fraction": 0.0232,
+        "nan_rows": 5107,
+        "nan_rows_inside_incidents": 5093,
+        "share_of_nans_inside_incidents": 0.9973,
+        "share_of_incident_rows_nan": 0.3516,
+        "long_runs": [
+          [
+            25121,
+            25822
+          ],
+          [
+            130299,
+            130459
+          ],
+          [
+            130545,
+            134772
+          ]
+        ]
+      },
+      "sensor_09": {
+        "nan_fraction": 0.0209,
+        "nan_rows": 4595,
+        "nan_rows_inside_incidents": 4581,
+        "share_of_nans_inside_incidents": 0.997,
+        "share_of_incident_rows_nan": 0.3163,
+        "long_runs": [
+          [
+            130165,
+            130460
+          ],
+          [
+            130560,
+            134772
+          ]
+        ]
+      },
+      "sensor_15": {
+        "nan_fraction": 1.0,
+        "nan_rows": 220320,
+        "nan_rows_inside_incidents": 14484,
+        "share_of_nans_inside_incidents": 0.0657,
+        "share_of_incident_rows_nan": 1.0,
+        "long_runs": [
+          [
+            0,
+            220320
+          ]
+        ]
+      },
+      "sensor_50": {
+        "nan_fraction": 0.3496,
+        "nan_rows": 77017,
+        "nan_rows_inside_incidents": 81,
+        "share_of_nans_inside_incidents": 0.0011,
+        "share_of_incident_rows_nan": 0.0056,
+        "long_runs": [
+          [
+            143324,
+            220320
+          ]
+        ]
+      },
+      "sensor_51": {
+        "nan_fraction": 0.0698,
+        "nan_rows": 15383,
+        "nan_rows_inside_incidents": 2999,
+        "share_of_nans_inside_incidents": 0.195,
+        "share_of_incident_rows_nan": 0.2071,
+        "long_runs": [
+          [
+            115678,
+            131034
+          ]
+        ]
+      },
+      "sensor_01": {
+        "long_runs": [
+          [
+            2002,
+            2032
+          ],
+          [
+            26483,
+            26508
+          ],
+          [
+            168011,
+            168029
+          ],
+          [
+            168030,
+            168072
+          ],
+          [
+            168073,
+            168273
+          ]
+        ]
+      },
+      "sensor_29": {
+        "long_runs": [
+          [
+            114326,
+            114367
+          ]
+        ]
+      },
+      "sensor_30": {
+        "long_runs": [
+          [
+            53909,
+            54148
+          ]
+        ]
+      },
+      "sensor_32": {
+        "long_runs": [
+          [
+            68620,
+            68655
+          ]
+        ]
+      }
+    },
+    "zero_saturation_audit": {
+      "sensor_05": {
+        "zero_share_fault": 0.5348,
+        "zero_share_normal": 0.0014
+      },
+      "sensor_11": {
+        "zero_share_fault": 0.2695,
+        "zero_share_normal": 0.0007
+      },
+      "sensor_12": {
+        "zero_share_fault": 0.8502,
+        "zero_share_normal": 0.0036
+      },
+      "sensor_13": {
+        "zero_share_fault": 0.9619,
+        "zero_share_normal": 0.0059
+      }
+    },
+    "hard_mode": false
+  },
+  "channels": [
+    "sensor_02",
+    "sensor_03",
+    "sensor_04",
+    "sensor_05",
+    "sensor_10",
+    "sensor_11",
+    "sensor_12",
+    "sensor_38",
+    "sensor_41",
+    "sensor_42"
+  ],
+  "channel_separation": {
+    "sensor_02": 3.5571,
+    "sensor_03": 2.2418,
+    "sensor_04": 6.5143,
+    "sensor_05": 6.9802,
+    "sensor_10": 5.6558,
+    "sensor_11": 5.1729,
+    "sensor_12": 4.2273,
+    "sensor_13": 1.2857,
+    "sensor_14": 0.646,
+    "sensor_16": 0.5242,
+    "sensor_17": 0.5953,
+    "sensor_18": 0.6031,
+    "sensor_19": 0.4182,
+    "sensor_20": 0.4191,
+    "sensor_21": 0.4154,
+    "sensor_22": 0.9042,
+    "sensor_23": 0.4332,
+    "sensor_24": 0.5813,
+    "sensor_25": 1.0266,
+    "sensor_26": 1.0616,
+    "sensor_27": 0.7794,
+    "sensor_28": 1.1145,
+    "sensor_31": 0.2884,
+    "sensor_33": 0.6899,
+    "sensor_34": 1.3995,
+    "sensor_35": 0.9787,
+    "sensor_36": 0.5957,
+    "sensor_37": 0.8908,
+    "sensor_38": 1.7421,
+    "sensor_39": 1.5802,
+    "sensor_40": 1.6352,
+    "sensor_41": 2.1463,
+    "sensor_42": 2.739,
+    "sensor_43": 1.6333,
+    "sensor_44": 1.1814,
+    "sensor_45": 1.1709,
+    "sensor_46": 1.2735,
+    "sensor_47": 0.8676,
+    "sensor_48": 1.6963,
+    "sensor_49": 1.412
+  },
+  "zscore_stats_source": "normal rows in [0, 30000)",
+  "cuts": {
+    "pump_nshot_pump_breakdown_inc01.csv": {
+      "rows": [
+        17155,
+        18100
+      ],
+      "n_rows": 945,
+      "label": "pump_breakdown",
+      "incident": 1
+    },
+    "pump_nshot_pump_breakdown_inc02.csv": {
+      "rows": [
+        24510,
+        27621
+      ],
+      "n_rows": 3111,
+      "label": "pump_breakdown",
+      "incident": 2
+    },
+    "pump_nshot_normal.csv": {
+      "rows": [
+        0,
+        8192
+      ],
+      "n_rows": 8192,
+      "label": "normal"
+    },
+    "pump_eval_inc03.csv": {
+      "rows": [
+        65222,
+        74727
+      ],
+      "n_rows": 9505,
+      "incident": 3,
+      "incident_rows": [
+        69318,
+        70631
+      ],
+      "incident_len": 1313,
+      "fault_rows": 1313
+    },
+    "pump_eval_inc04.csv": {
+      "rows": [
+        73694,
+        82492
+      ],
+      "n_rows": 8798,
+      "incident": 4,
+      "incident_rows": [
+        77790,
+        78396
+      ],
+      "incident_len": 606,
+      "fault_rows": 606
+    },
+    "pump_eval_inc05.csv": {
+      "rows": [
+        123944,
+        140527
+      ],
+      "n_rows": 16583,
+      "incident": 5,
+      "incident_rows": [
+        128040,
+        136431
+      ],
+      "incident_len": 8391,
+      "fault_rows": 8391
+    },
+    "pump_eval_inc06.csv": {
+      "rows": [
+        137035,
+        145269
+      ],
+      "n_rows": 8234,
+      "incident": 6,
+      "incident_rows": [
+        141131,
+        141173
+      ],
+      "incident_len": 42,
+      "fault_rows": 42
+    },
+    "pump_eval_inc07.csv": {
+      "rows": [
+        162344,
+        170612
+      ],
+      "n_rows": 8268,
+      "incident": 7,
+      "incident_rows": [
+        166440,
+        166516
+      ],
+      "incident_len": 76,
+      "fault_rows": 76
+    },
+    "pump_quick_test.csv": {
+      "rows": [
+        140107,
+        142197
+      ],
+      "n_rows": 2090,
+      "fault_rows": 42
+    }
+  },
+  "window_feasibility": {
+    "16": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "shot_windows_at_step_1": 4026
+    },
+    "32": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "shot_windows_at_step_1": 3994
+    },
+    "64": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "shot_windows_at_step_1": 3930
+    },
+    "128": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7
+      ],
+      "shot_windows_at_step_1": 3802
+    },
+    "256": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "shot_windows_at_step_1": 3546
+    },
+    "512": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "shot_windows_at_step_1": 3034
+    },
+    "1024": {
+      "detectable_incidents": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "shot_windows_at_step_1": 2088
+    }
+  }
+}

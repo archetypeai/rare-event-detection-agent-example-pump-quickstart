@@ -1,0 +1,162 @@
+{
+  "contract": "red-role-files/v1",
+  "classes": [
+    "normal",
+    "pump_breakdown"
+  ],
+  "background": "normal",
+  "channels": [
+    "sensor_02",
+    "sensor_03",
+    "sensor_04",
+    "sensor_05",
+    "sensor_10",
+    "sensor_11",
+    "sensor_12",
+    "sensor_38",
+    "sensor_41",
+    "sensor_42"
+  ],
+  "source": "data/raw/sensor.csv",
+  "training": [
+    {
+      "file": "training/normal.csv",
+      "rows": [
+        0,
+        8192
+      ],
+      "n_rows": 8192,
+      "fault_rows": 0,
+      "class": "normal",
+      "incident": null
+    },
+    {
+      "file": "training/pump_breakdown_inc01.csv",
+      "rows": [
+        17155,
+        18100
+      ],
+      "n_rows": 945,
+      "fault_rows": 945,
+      "class": "pump_breakdown",
+      "incident": 1
+    },
+    {
+      "file": "training/pump_breakdown_inc02.csv",
+      "rows": [
+        24510,
+        27621
+      ],
+      "n_rows": 3111,
+      "fault_rows": 3111,
+      "class": "pump_breakdown",
+      "incident": 2
+    }
+  ],
+  "validation": [
+    {
+      "file": "validation/inc03.csv",
+      "rows": [
+        65222,
+        74210
+      ],
+      "n_rows": 8988,
+      "fault_rows": 1313,
+      "incident": 3,
+      "incident_rows": [
+        69318,
+        70631
+      ]
+    }
+  ],
+  "test": [
+    {
+      "file": "test/inc04.csv",
+      "rows": [
+        74210,
+        82492
+      ],
+      "n_rows": 8282,
+      "fault_rows": 606,
+      "incident": 4,
+      "incident_rows": [
+        77790,
+        78396
+      ]
+    },
+    {
+      "file": "test/inc05.csv",
+      "rows": [
+        123944,
+        138781
+      ],
+      "n_rows": 14837,
+      "fault_rows": 8391,
+      "incident": 5,
+      "incident_rows": [
+        128040,
+        136431
+      ]
+    },
+    {
+      "file": "test/inc06.csv",
+      "rows": [
+        138781,
+        145269
+      ],
+      "n_rows": 6488,
+      "fault_rows": 42,
+      "incident": 6,
+      "incident_rows": [
+        141131,
+        141173
+      ]
+    },
+    {
+      "file": "test/inc07.csv",
+      "rows": [
+        162344,
+        170612
+      ],
+      "n_rows": 8268,
+      "fault_rows": 76,
+      "incident": 7,
+      "incident_rows": [
+        166440,
+        166516
+      ]
+    }
+  ],
+  "delivery": [
+    {
+      "file": "delivery/inc04.csv",
+      "rows": [
+        76766,
+        79420
+      ],
+      "n_rows": 2654,
+      "fault_rows": 606,
+      "incident": 4,
+      "incident_rows": [
+        77790,
+        78396
+      ],
+      "labels": "labels/inc04_labels.csv"
+    },
+    {
+      "file": "delivery/inc07.csv",
+      "rows": [
+        165416,
+        167540
+      ],
+      "n_rows": 2124,
+      "fault_rows": 76,
+      "incident": 7,
+      "incident_rows": [
+        166440,
+        166516
+      ],
+      "labels": "labels/inc07_labels.csv"
+    }
+  ]
+}
