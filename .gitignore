@@ -16,6 +16,9 @@ fit/out/*.log
 # Live ids, deleted when their script ends; fit/cleanup.py reads them after a kill
 fit/out/serve_state.json
 fit/out/cleanup_state.json
+fit/out/app_serving_state.json
+fit/out/library_state.json
+fit/out/library_embeddings/
 
 # Python
 __pycache__/

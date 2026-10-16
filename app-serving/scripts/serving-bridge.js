@@ -1,0 +1,333 @@
+/**
+ * The agent, on the Archetype AI platform: a bridge between the local broker
+ * and a serving agent of the promoted RED classifier.
+ *
+ * In app/ the agent is `agent_edge_runtime` on this laptop, subscribed to the
+ * broker. Here the agent runs on the platform (Dev's agent serving), and this
+ * process stands where the runtime stood:
+ *
+ *   sensors/red ──► bridge: the latest 64 rows ──POST /query──► serving agent
+ *                     ▲                                             │
+ *                     └─────────── red/results ◄── one record per window ┘
+ *
+ * - THE BROWSER NEVER HOLDS THE API KEY. The bridge reads it from the repo's
+ *   .env and is the only thing that talks to the platform.
+ * - A QUERY CARRIES THE WHOLE WINDOW. A served agent keeps nothing between
+ *   queries (fit/serve.py, Stage 8), so the bridge keeps the buffer and sends
+ *   the latest `window_size` rows on every row: step 1, as Stage 7 delivered.
+ * - THE SAME MESSAGE AS THE EDGE RUNTIME. `red/results` gets the record the
+ *   agent answered (predicted_state, invalid, p_*, embedding_<channel>), with
+ *   the window's timestamps put back: the served agent numbers rows 0..63
+ *   within the query, the bridge knows which rows it sent.
+ * - THE SAME ADMIN API AS THE EDGE RUNTIME, so the replayer is app/'s:
+ *   GET /status reports `Running` once the serving agent is, POST /reset drops
+ *   the buffer and anything queued (a seek or incident switch), POST /start is
+ *   a no-op, POST /shutdown cleans up and exits (scripts/stop.sh calls it).
+ * - ONE SERVING WORKER, HELD WHILE THIS RUNS. Dev has 3 for everyone. On exit
+ *   the agents are cancelled and deleted, and the bundle deleted; the ids sit in
+ *   fit/out/app_serving_state.json until then, so `python3 fit/cleanup.py`
+ *   finds them after a hard kill. An agent the platform released (20 minutes
+ *   without a query, e.g. a paused replay) is deleted and replaced on the next
+ *   window: a bundle that still has an agent can't be deleted (409).
+ *
+ * Env (repo .env): ATAI_API_ENDPOINT (dev only), ATAI_API_KEY.
+ * Env (app-serving/.env): MQTT_PORT, AGENT_PORT.
+ */
+import mqtt from 'mqtt';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, '../..');
+
+function loadDotenv(file) {
+	if (!fs.existsSync(file)) return;
+	for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+		const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+		if (m && !line.trimStart().startsWith('#') && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+	}
+}
+loadDotenv(path.join(HERE, '..', '.env'));
+loadDotenv(path.join(REPO, '.env'));
+
+const ENDPOINT = (process.env.ATAI_API_ENDPOINT ?? '').replace(/\/+$/, '').replace(/\/v\d+(\.\d+)*$/, '');
+const KEY = process.env.ATAI_API_KEY;
+if (!ENDPOINT || !KEY) {
+	console.error('bridge: set ATAI_API_ENDPOINT and ATAI_API_KEY in the repo .env');
+	process.exit(1);
+}
+if (!ENDPOINT.includes('api.dev.')) {
+	console.error(`bridge: ${ENDPOINT}: agent serving is on dev only for now`);
+	process.exit(1);
+}
+const MQTT_PORT = Number(process.env.MQTT_PORT ?? 1891);
+const BROKER_URL = process.env.BROKER ?? `mqtt://127.0.0.1:${MQTT_PORT}`;
+const ADMIN_PORT = Number(process.env.AGENT_PORT ?? 9101);
+const MODEL = 'red-pump';
+const STATE = path.join(REPO, 'fit', 'out', 'app_serving_state.json');
+
+if (fs.existsSync(STATE)) {
+	console.error(`bridge: ${path.relative(REPO, STATE)} holds an earlier bridge's agent: run python3 fit/cleanup.py --yes`);
+	process.exit(1);
+}
+const test = JSON.parse(fs.readFileSync(path.join(REPO, 'fit', 'out', 'test_state.json'), 'utf8'));
+const PROMOTED = test.blueprint.key;
+const SERVED = `${PROMOTED}-served-records`;
+const WINDOW = test.blueprint.values.window_size;
+// The classifier's channel order: the role files', which the replayer publishes in.
+const CHANNELS = JSON.parse(fs.readFileSync(path.join(REPO, 'data', 'roles', 'manifest.json'), 'utf8')).channels;
+
+// ------------------------------------------------------------------ the platform
+
+async function api(method, p, body) {
+	const r = await fetch(`${ENDPOINT}/agents${p}`, {
+		method,
+		headers: { Authorization: `Bearer ${KEY}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+		body: body ? JSON.stringify(body) : undefined,
+		signal: AbortSignal.timeout(120_000)
+	});
+	const text = await r.text();
+	if (!r.ok) {
+		const e = new Error(`${method} ${p} → ${r.status}: ${text.slice(0, 300)}`);
+		e.status = r.status;
+		throw e;
+	}
+	return text ? JSON.parse(text) : {};
+}
+
+/** `agents`: every agent of the bundle not yet deleted, the current one last. */
+const live = { bundle: null, agent: null, agents: [], running: false };
+const save = () => fs.writeFileSync(STATE, JSON.stringify(
+	{ endpoint: ENDPOINT, bundle: live.bundle, agent: live.agent, agents: live.agents }, null, 1));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function ensureServedBlueprint() {
+	try {
+		await api('GET', `/blueprints/${SERVED}`);
+		return;
+	} catch (e) {
+		if (e.status !== 404) throw e;
+	}
+	// The same served copy fit/serve.py makes: promoted blueprint, step 1,
+	// atai-records serving endpoint in place of the CSV source and sink.
+	const src = await api('GET', `/blueprints/${PROMOTED}`);
+	const doc = structuredClone(src.document);
+	delete doc.blueprint_id;
+	doc.values.step_size = 1;
+	const endpoint = { format: 'serving', kind: 'http', protocols: ['atai-records'] };
+	doc.connectors = {
+		source: { key: 'RecordsSource', config: { ...endpoint, models: [MODEL],
+			data_columns: [{ dtype: 'f32', names: doc.values.data_columns }], timestamp_column: doc.values.timestamp_column } },
+		sink: { key: 'RecordsSink', config: { ...endpoint } }
+	};
+	doc.name = `${src.name} (served, records)`;
+	await api('POST', '/blueprints', { blueprint_key: SERVED, name: doc.name, document: doc,
+		description: `${PROMOTED} served with atai-records, step 1.` });
+	console.log(`bridge: created served blueprint ${SERVED}`);
+}
+
+async function startAgent() {
+	if (!live.bundle) {
+		live.bundle = (await api('POST', '/bundles', { blueprint: SERVED, name: 'RED app-serving',
+			values: { output_embeddings: true } })).id;
+		save();
+	}
+	live.agent = (await api('POST', `/bundles/${live.bundle}/run`, { mode: 'serving' })).id;
+	live.agents.push(live.agent);
+	save();
+	const t0 = Date.now();
+	for (;;) {
+		const s = (await api('GET', `/instances/${live.agent}`)).status;
+		if (s === 'running') break;
+		if (['failed', 'completed', 'cancelled', 'canceled'].includes(s) || Date.now() - t0 > 600_000)
+			throw new Error(`agent ${live.agent} is ${s}`);
+		await sleep(2000);
+	}
+	live.running = true;
+	console.log(`bridge: serving agent ${live.agent} running (bundle ${live.bundle}, ${SERVED})`);
+}
+
+/** Cancel and delete an agent; true once it is gone (404 counts). */
+async function dropAgent(id) {
+	await api('POST', `/instances/${id}/cancel`, {}).catch(() => {});   // a released agent is already stopped
+	try {
+		await api('DELETE', `/instances/${id}`);
+	} catch (e) {
+		if (e.status !== 404) {
+			console.error(`bridge: ${e.message}`);
+			return false;
+		}
+	}
+	live.agents = live.agents.filter((a) => a !== id);
+	save();
+	return true;
+}
+
+let stopping = false;
+async function shutdown(sig) {
+	if (stopping) return;
+	stopping = true;
+	console.log(`bridge: ${sig}, cleaning up`);
+	let left = 0;
+	try {
+		for (const id of [...live.agents]) if (!(await dropAgent(id))) left++;
+		if (live.bundle && !left) {
+			try {
+				await api('DELETE', `/bundles/${live.bundle}`);
+			} catch (e) {
+				if (e.status !== 404) {
+					console.error(`bridge: ${e.message}`);
+					left++;
+				}
+			}
+		}
+		if (left) {
+			// Keep the ids for fit/cleanup.py rather than leaving them on the platform unrecorded.
+			console.error(`bridge: not everything was deleted; run python3 fit/cleanup.py --yes (ids in ${path.relative(REPO, STATE)})`);
+		} else {
+			fs.rmSync(STATE, { force: true });
+			console.log(`bridge: deleted its agent(s) and bundle ${live.bundle ?? '(none)'}`);
+		}
+	} finally {
+		process.exit(left ? 1 : 0);
+	}
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
+// Anything unexpected still cleans up: an exit without it would hold a Dev worker.
+process.on('uncaughtException', (e) => { console.error('bridge:', e); shutdown('error'); });
+process.on('unhandledRejection', (e) => { console.error('bridge:', e); shutdown('error'); });
+
+/** Replace a released agent: delete it, then start another, retrying while
+ *  Dev's serving workers are all taken. */
+async function replaceAgent() {
+	live.running = false;
+	if (live.agent) await dropAgent(live.agent);
+	for (let wait = 15_000; !stopping; wait = Math.min(wait * 2, 120_000)) {
+		try {
+			await startAgent();
+			return;
+		} catch (e) {
+			console.error(`bridge: could not start a serving agent (${e.message}); retrying in ${wait / 1000} s`);
+			if (live.agent && live.agents.includes(live.agent)) await dropAgent(live.agent);
+			await sleep(wait);
+		}
+	}
+}
+
+// ------------------------------------------------------------------ the windows
+
+/** Rows of the current section, oldest first: {t, values[10]}. */
+let buffer = [];
+/** Bumped on every reset, so an answer to a query sent before it is dropped. */
+let generation = 0;
+const queue = [];
+let busy = false;
+const latencies = [];
+
+function onRow(payload) {
+	const kv = Object.fromEntries(payload.toString().split(',').map((p) => p.split('=')));
+	buffer.push({ t: Number(kv.timestamp_ms), values: CHANNELS.map((c) => Number(kv[c])) });
+	if (buffer.length > WINDOW + 64) buffer.splice(0, buffer.length - WINDOW);
+	if (buffer.length >= WINDOW) {
+		queue.push({ gen: generation, rows: buffer.slice(-WINDOW) });
+		drain().catch((e) => console.error(`bridge: ${e.message}`));
+	}
+}
+
+async function drain() {
+	if (busy) return;
+	busy = true;
+	try {
+		while (queue.length && !stopping) {
+			// The replayer starts before the agent is up (or while a released one is
+			// replaced): hold the windows until it runs. Its flow control waits too.
+			while (!live.running && !stopping) await sleep(500);
+			const job = queue.shift();
+			if (!job || job.gen !== generation) continue;
+			const body = { model: MODEL, query: '', events: [{ type: 'data.numeric_array',
+				event_data: { contents: CHANNELS.map((_, c) => job.rows.map((r) => r.values[c])) } }] };
+			let answer;
+			const t = Date.now();
+			try {
+				answer = await api('POST', `/instances/${live.agent}/query`, body);
+			} catch (e) {
+				if (e.status === 409) {
+					console.warn(`bridge: agent ${live.agent} no longer running; replacing it`);
+					await replaceAgent();
+					queue.unshift(job);
+					continue;
+				}
+				console.error(`bridge: query failed: ${e.message}`);
+				publish({ predicted_state: 'INVALID_STATE', invalid: 'true',
+					start_timestamp: job.rows[0].t, finish_timestamp: job.rows.at(-1).t });
+				continue;
+			}
+			latencies.push(Date.now() - t);
+			if (latencies.length > 200) latencies.shift();
+			if (job.gen !== generation) continue;
+			const rec = (answer.response ?? answer).data?.[0];
+			if (!rec) {
+				console.error(`bridge: no record in ${JSON.stringify(answer).slice(0, 200)}`);
+				continue;
+			}
+			// The record as the agent answered it (predicted_state, invalid, p_*,
+			// embedding_<channel>), with the window's own timestamps in ms.
+			publish({ ...rec, start_timestamp: job.rows[0].t, finish_timestamp: job.rows.at(-1).t,
+				latency_ms: Date.now() - t });
+		}
+	} finally {
+		busy = false;
+	}
+}
+
+const client = mqtt.connect(BROKER_URL, { clientId: `red-serving-bridge-${Date.now()}` });
+const publish = (msg) => client.publish('red/results', JSON.stringify(msg));
+
+client.on('connect', () => {
+	client.subscribe('sensors/red', { qos: 1 });
+	console.log(`bridge: connected to ${BROKER_URL}`);
+});
+client.on('message', (_topic, payload) => onRow(payload));
+client.on('error', (e) => console.error('bridge mqtt error:', e.message));
+
+// ------------------------------------------------- the edge runtime's admin API
+
+function reset() {
+	generation++;
+	buffer = [];
+	queue.length = 0;
+}
+
+http.createServer((req, res) => {
+	const reply = (code, body) => {
+		res.writeHead(code, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify(body));
+	};
+	if (req.method === 'GET' && req.url === '/status') {
+		const ms = [...latencies].sort((a, b) => a - b);
+		return reply(live.running ? 200 : 503, { state: live.running ? 'Running' : 'Starting', agent: live.agent,
+			bundle: live.bundle, blueprint: SERVED, queued: queue.length, medianLatencyMs: ms[Math.floor(ms.length / 2)] ?? null });
+	}
+	if (req.method === 'POST' && req.url === '/reset') {
+		reset();
+		return reply(200, { reset: true });
+	}
+	if (req.method === 'POST' && req.url === '/start') return reply(200, { started: true });
+	if (req.method === 'POST' && req.url === '/shutdown') {
+		reply(200, { shutting_down: true });
+		return shutdown('POST /shutdown');
+	}
+	reply(404, { error: 'not found' });
+}).listen(ADMIN_PORT, '127.0.0.1', () => console.log(`bridge: admin API on http://127.0.0.1:${ADMIN_PORT}`));
+
+// ------------------------------------------------------------------------ start
+
+try {
+	await ensureServedBlueprint();
+	await startAgent();
+} catch (e) {
+	console.error(`bridge: ${e.message}`);
+	await shutdown('startup failure');
+}

@@ -1,0 +1,141 @@
+@import "@archetypeai/ds-lib-tokens/theme.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ---------------------------------------------------------------------------
+   Default border colour. Tailwind v4 dropped v3's preflight rule that made a
+   bare `border` use the theme's border colour; in v4 it falls back to
+   `currentColor`, so any DS component that writes `border` without a colour
+   inherits the text colour instead.
+
+   On this near-black plate that is white. Exactly one element in the app hit it
+   — the Select popover (`select-content` sets `border` and `bg-popover` but no
+   border colour) — which rendered a 1px white outline around the incident menu
+   where the rig monitor draws a near-invisible grey one. Same component, same
+   classes, same tokens; only this base rule was missing, so the two apps' menus
+   did not match.
+
+   Scoped to the element list from Tailwind's own v3→v4 compatibility snippet.
+   `currentColor` stays as the fallback so nothing loses a border if the token
+   ever goes missing.
+   --------------------------------------------------------------------------- */
+@layer base {
+	*,
+	::after,
+	::before,
+	::backdrop,
+	::file-selector-button {
+		border-color: var(--color-border, currentColor);
+	}
+}
+
+/* ---------------------------------------------------------------------------
+   Draughtsman's ink, copied from osm-rig-monitor. TWO TONES, NO HUES — the whole
+   point of the rig plate's palette, and the reason it reads as a drawing rather
+   than a wiring diagram. `stone` is the DS's warm neutral ramp, so the ink reads
+   as ink rather than as another grey UI line.
+
+     --plate-ink       outlines and every called-out part
+     --plate-ink-soft  context and section hatching: present, never competing
+
+   Light mode is the aged-plate case (dark sepia); dark mode inverts to warm bone
+   lines on the near-black page.
+
+   Used only by the pump plate.
+   --------------------------------------------------------------------------- */
+
+:root {
+	--plate-ink: var(--color-stone-800);
+	--plate-ink-soft: var(--color-stone-400);
+}
+
+.dark {
+	--plate-ink: var(--color-stone-200);
+	--plate-ink-soft: var(--color-stone-500);
+}
+
+/* Registered as theme colors so the ink is reachable as utilities as well as var() */
+@theme {
+	--color-plate-ink: var(--plate-ink);
+	--color-plate-ink-soft: var(--plate-ink-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   Platform chip surfaces, copied verbatim from osm-rig-monitor's layout.css so
+   the workbench's Run Agent and Settings buttons match the rig monitor's.
+   The DS ships the button VARIANTS (`runAgent`, `agentSettings`) but not these
+   three classes, which is why a copied button renders black-on-transparent —
+   invisible on this plate — until they are present.
+
+   Purely additive: the original route uses none of them, so nothing on / can
+   change. Remove them with the v2 tree if v2 is ever abandoned.
+
+   NOTE ON THEME: these are the platform's LIGHT-surface gradients, copied
+   exactly as the rig monitor copied them. On a near-black plate the neutral
+   surface reads as a bright chip rather than a subtly raised one — a known
+   deviation there, kept here so the two demos look the same.
+   --------------------------------------------------------------------------- */
+
+.run-agent-surface {
+	background-image:
+		linear-gradient(
+			oklch(1 0 0 / 0.34),
+			oklch(1 0 0 / 0.1) min(9%, 3px),
+			oklch(1 0 0 / 0) min(26%, 9px),
+			oklch(0 0 0 / 0) max(74%, 100% - 10px),
+			oklch(0 0 0 / 0.025) max(91%, 100% - 4px),
+			oklch(0 0 0 / 0.07)
+		),
+		linear-gradient(oklch(0.864 0.057 266.625 / 0.95) 0px, oklch(0.864 0.057 266.625 / 0.95) 0px),
+		linear-gradient(
+			oklch(0.964 0.057 266.625),
+			oklch(0.864 0.057 266.625) min(38%, 16px),
+			oklch(0.864 0.057 266.625) max(62%, 100% - 16px),
+			oklch(0.794 0.057 266.625)
+		);
+}
+
+.bottom-toolbar-surface {
+	background-image:
+		linear-gradient(
+			oklch(1 0 0 / 0.42),
+			oklch(1 0 0 / 0.12) min(9%, 3px),
+			oklch(1 0 0 / 0) min(26%, 9px),
+			oklch(0 0 0 / 0) max(74%, 100% - 10px),
+			oklch(0 0 0 / 0.02) max(91%, 100% - 4px),
+			oklch(0 0 0 / 0.055)
+		),
+		linear-gradient(oklch(0.985 0 0 / 0.95) 0px, oklch(0.985 0 0 / 0.95) 0px),
+		linear-gradient(
+			oklch(1 0.004 286.32),
+			oklch(0.92 0.004 286.32) min(38%, 16px),
+			oklch(0.92 0.004 286.32) max(62%, 100% - 16px),
+			oklch(0.84 0.004 286.32)
+		);
+}
+
+/* The drop stack is shared; only the two inset lines differ per surface, which is
+   why they are written into each shadow rather than factored out — box-shadow is a
+   single property and cannot be composed across classes. */
+.shadow-bottom-toolbar {
+	box-shadow:
+		oklch(1 0 0 / 0.9) 0 0.5px 0 0 inset,
+		oklch(0 0 0 / 0.055) 0 -0.5px 0 0 inset,
+		oklch(0.141 0.005 285.823 / 0) 0 54px 15px 0,
+		oklch(0.141 0.005 285.823 / 0.03) 0 34px 14px 0,
+		oklch(0.141 0.005 285.823 / 0.1) 0 19px 12px 0,
+		oklch(0.141 0.005 285.823 / 0.17) 0 9px 9px 0,
+		oklch(0.141 0.005 285.823 / 0.2) 0 2px 5px 0;
+}
+.run-agent-surface.shadow-bottom-toolbar {
+	box-shadow:
+		oklch(1 0 0 / 0.7) 0 0.5px 0 0 inset,
+		oklch(0 0 0 / 0.07) 0 -0.5px 0 0 inset,
+		oklch(0.141 0.005 285.823 / 0) 0 54px 15px 0,
+		oklch(0.141 0.005 285.823 / 0.03) 0 34px 14px 0,
+		oklch(0.141 0.005 285.823 / 0.1) 0 19px 12px 0,
+		oklch(0.141 0.005 285.823 / 0.17) 0 9px 9px 0,
+		oklch(0.141 0.005 285.823 / 0.2) 0 2px 5px 0;
+}
