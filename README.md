@@ -28,6 +28,7 @@
 | 6 | **deliver:** a bundle from that blueprint, run over the delivery files | 1 min |
 | 7 | **score** the delivery against the held-back labels | seconds |
 | 8 | **serve** it a window per query over `/query` (agent serving, Dev only), checked against Stage 6 | 7 min |
+| 9 | **watch it live** (optional): the pump monitor in `app-serving/`, its agent served from the platform | as long as you like |
 
   About **10 minutes** end to end through Stage 7, 8 of them on the platform; serving (Stage 8) adds 7 minutes. Platform times
   vary with load: the same agent runs went at ~4 windows a second that morning
@@ -389,6 +390,32 @@ served 1,162 windows of 2 file(s) in 1,162 queries, 416 s
 **Writes:** `eval_out/serving/serve_inc04_inc07_wpq1.csv` (a row per window) and
 `.json` (the summary).
 
+### Stage 9 (optional): watch it live, served from the platform
+
+```sh
+python3 fit/library_embeddings.py     # once: the embedding space, recomputed in batch (~1 min on Dev)
+cd app-serving && npm install && npm run dev
+open http://localhost:5181
+```
+
+[`app-serving/`](app-serving/README.md) is a live pump monitor: the replayer plays
+Stage 6's delivery files as if the pump were running now, and a **serving bridge**
+sends Stage 8's served classifier the latest 64 rows for every row. The sensor
+traces, the verdict, the alarm, a timeline and an embedding space update as the
+answers come back. The API key stays in the bridge, never in the browser.
+
+- **The embedding space is recomputed on the platform.** The promoted classifier
+  can't be downloaded and no API returns embeddings, so
+  [`fit/library_embeddings.py`](fit/library_embeddings.py) runs the 3 training
+  files through the promoted blueprint in batch with `output_embeddings: true`, at
+  step 4: 3,016 of the 12,059 training windows, and their PCA.
+- **Every verdict is Stage 6's.** On Dev (2026-10-16), breakdown #4's demo window,
+  1,023 windows, came back with every state and probability identical to
+  `eval_out/delivery/red-output-inc04.csv`, at 301 ms a query: the incident plays
+  in about 6 minutes.
+- **Dev only, one serving worker while it runs.** `npm run stop` deletes the
+  bridge's agent and bundle.
+
 ### Clean up the platform
 
 ```sh
@@ -397,10 +424,11 @@ python3 fit/cleanup.py --yes     # delete it
 ```
 
 It deletes, from the ids in `fit/out/`, Stage 6's 2 delivery agents and their
-bundle (their outputs are in `eval_out/delivery/`), and Stage 8's serving agent
-and bundle if `fit/serve.py` was killed before its own cleanup (`kill -9`, a
-closed laptop): a running serving agent holds one of Dev's 3 serving workers
-until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
+bundle (their outputs are in `eval_out/delivery/`), Stage 9's 3 library agents and
+their bundle (the view is in `app-serving/static/`), and a serving agent and its
+bundle if `fit/serve.py` or `app-serving/` was killed before its own cleanup
+(`kill -9`, a closed laptop): a running serving agent holds one of Dev's 3 serving
+workers until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
 bundle that still has one answers 409); an id already gone counts as done.
 
 **What stays:** the promoted blueprint and its served copy (deleting a blueprint
@@ -427,6 +455,7 @@ curl -s "$ATAI_API_ENDPOINT/agents/instances?status=running&limit=100" -H "Autho
 | 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60): the full example's |
 | 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) |
 | 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 348 ms a query |
+| 9 | the live monitor, breakdown #4's demo window (1,023 windows) | every state and probability identical to Stage 6; 301 ms a query |
 
 Prep, Optimize and Evals are deterministic here: this run, from fresh uploads,
 a new optimization and a new promoted blueprint, matches the full example's to
@@ -457,7 +486,9 @@ the expected outputs above show at which stage.
 | `fit/deliver.py` | Stage 6, then Stage 7's scoring |
 | `fit/evaluate_events.py` | Stage 7 |
 | `fit/serve.py` | Stage 8: the served blueprint, a serving agent, a query per window, every answer checked against Stage 6. Dev only |
-| `fit/cleanup.py` | the agents and bundles of Stages 6 and 8, from the ids in `fit/out/`; dry run unless `--yes` |
+| `fit/library_embeddings.py` | Stage 9: the training windows' embeddings, recomputed in batch, and their PCA for `app-serving/` |
+| `app-serving/` | Stage 9: the live pump monitor, its agent served from the platform ([`app-serving/README.md`](app-serving/README.md)). Dev only |
+| `fit/cleanup.py` | the agents and bundles of Stages 6, 8 and 9, from the ids in `fit/out/`; dry run unless `--yes` |
 | `data/prepared/` | Stage 1's output: training files, slices and label sidecars, z-score stats, `prep_report.json` (Git LFS) |
 | `data/roles/` | Stage 2's output: the role files and labels Stages 3–7 read (Git LFS) |
 | `fit/out/`, `eval_out/delivery/`, `eval_out/serving/` | this repo's run: state and results |

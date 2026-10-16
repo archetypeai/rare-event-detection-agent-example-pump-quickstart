@@ -6,6 +6,11 @@
 
 What it deletes, from the ids the stages recorded in fit/out/:
 
+  Stage 9   the serving bridge's agents and bundle, if app-serving/ was killed
+            before it could delete them (app_serving_state.json; the bundle's
+            listing also finds an agent it replaced), and the 3 batch agents and
+            bundle of fit/library_embeddings.py (library_state.json; the view is
+            already in app-serving/static/).
   Stage 8   a serving agent and its bundle, if fit/serve.py was killed before
             it could delete them (serve_state.json). A running serving agent
             holds one of dev's 3 serving workers until it is cancelled or idle
@@ -32,7 +37,7 @@ import sys
 from atai import TERMINAL, agents_base, load_dotenv, load_state, log, request, save_state, state_path
 from red_api import iter_instances
 
-STAGES = {"serve": "Stage 8", "deliver": "Stage 6"}
+STAGES = {"app": "Stage 9", "serve": "Stage 8", "deliver": "Stage 6"}
 
 
 def call(method: str, path: str, body=None):
@@ -51,10 +56,20 @@ def main() -> int:
     args = ap.parse_args()
     load_dotenv()
 
+    bridge = load_state(state_path("app_serving"))
+    library = load_state(state_path("library"))
     serve = load_state(state_path("serve"))
     deliver = load_state(state_path("deliver"))
     test = load_state(state_path("test"))
     targets = []                                   # (stage, kind, id), agents before their bundle
+    if bridge.get("bundle"):
+        agents = set(bridge.get("agents") or []) | ({bridge["agent"]} if bridge.get("agent") else set())
+        agents |= {r["id"] for r in iter_instances(bridge["bundle"])}
+        targets += [(STAGES["app"], "instances", a) for a in sorted(agents)]
+        targets += [(STAGES["app"], "bundles", bridge["bundle"])]
+    if library.get("bundle"):
+        targets += [(STAGES["app"], "instances", a) for a in sorted(set(library.get("agents", {}).values()))]
+        targets += [(STAGES["app"], "bundles", library["bundle"])]
     if serve.get("bundle"):
         targets += [(STAGES["serve"], "instances", serve["agent"])] if serve.get("agent") else []
         targets += [(STAGES["serve"], "bundles", serve["bundle"])]
@@ -92,8 +107,9 @@ def main() -> int:
             done["deleted"] = sorted(gone)
             save_state(done_path, done)
             log(f"deleted {k}/{len(todo)}")
-    if serve.get("bundle"):
-        state_path("serve").unlink()
+    for kind, st in (("serve", serve), ("app_serving", bridge)):
+        if st.get("bundle"):
+            state_path(kind).unlink()
     log("done")
     return 0
 
