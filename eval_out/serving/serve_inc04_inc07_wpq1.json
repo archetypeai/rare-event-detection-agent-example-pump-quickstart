@@ -1,0 +1,55 @@
+{
+ "blueprint": "red-pump-otr_3ettyhtcr89s7rrwt6b8qqam8f",
+ "served_blueprint": "red-pump-otr_3ettyhtcr89s7rrwt6b8qqam8f-served-records",
+ "files": [
+  {
+   "file": "inc04",
+   "windows": 846,
+   "first_end_row": 904,
+   "last_end_row": 1749,
+   "breakdown_rows": [
+    1024,
+    1630
+   ],
+   "served": {
+    "latency": 54,
+    "false_alarms": 45
+   },
+   "batch": {
+    "latency": 54,
+    "false_alarms": 45
+   }
+  },
+  {
+   "file": "inc07",
+   "windows": 316,
+   "first_end_row": 904,
+   "last_end_row": 1219,
+   "breakdown_rows": [
+    1024,
+    1100
+   ],
+   "served": {
+    "latency": 60,
+    "false_alarms": 0
+   },
+   "batch": {
+    "latency": 60,
+    "false_alarms": 0
+   }
+  }
+ ],
+ "windows": 1162,
+ "windows_per_query": 1,
+ "queries": 1162,
+ "same_state": 1162,
+ "same_p": 1162,
+ "max_p_diff": 0.0,
+ "invalid": 0,
+ "latency_ms": {
+  "median": 348,
+  "p95": 414,
+  "max": 544
+ },
+ "replay_seconds": 415.7
+}

@@ -13,6 +13,10 @@ data/raw/
 # Logs
 fit/out/*.log
 
+# Live ids, deleted when their script ends; fit/cleanup.py reads them after a kill
+fit/out/serve_state.json
+fit/out/cleanup_state.json
+
 # Python
 __pycache__/
 *.py[cod]
