@@ -186,7 +186,9 @@ The same slot as the full example's `app-serving/`, so run one of the two at a t
 | `scripts/replayer.js` | replays Stage 6's delivery files one at a time, paced by the agent |
 | `scripts/run-broker.sh`, `scripts/stop.sh`, `mosquitto/` | the broker on 1891 / 9009, and stopping everything (matched by `--app red-serving`, so other demos are left alone) |
 | `static/red-embedding-landscape.json` | the recomputed cloud and projection, from `fit/library_embeddings.py` |
-| `src/` | the SvelteKit workbench |
+| `src/` | the SvelteKit workbench, on the Archetype AI design system 0.19 (`@archetypeai/ds-lib-tokens` and `ds-ui-svelte-console`, from npm) |
+| `src/lib/components/ui/` | `patterns/` (the menubar and its lockup, the pane), `custom/` (the panels, the pump plate, the embedding space, Settings) and `primitives/` (Slider and ScrollArea, which the design system's package doesn't ship) |
+| `CLAUDE.md`, `ds-manifest.json` | the design system's guide and component catalogue for coding agents, from `npx @archetypeai/ds-cli add ds-config-codeagent --claude`: regenerate them rather than edit |
 
 ## Data attribution
 

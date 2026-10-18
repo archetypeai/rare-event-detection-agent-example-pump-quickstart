@@ -1,9 +1,9 @@
 <script>
 	import { pump } from '$lib/stores/pump.svelte.js';
-	import Menubar from '$lib/components/v2/ui/patterns/menubar/index.js';
-	import InputPanel from '$lib/components/v2/ui/custom/input-panel.svelte';
-	import OutputPanel from '$lib/components/v2/ui/custom/output-panel.svelte';
-	import SettingsDialog from '$lib/components/v2/ui/custom/settings-dialog.svelte';
+	import Menubar from '$lib/components/ui/patterns/menubar/index.js';
+	import InputPanel from '$lib/components/ui/custom/input-panel.svelte';
+	import OutputPanel from '$lib/components/ui/custom/output-panel.svelte';
+	import SettingsDialog from '$lib/components/ui/custom/settings-dialog.svelte';
 
 	// RED Pump Monitor rebuilt on osm-rig-monitor's workbench, so the two demos read as
 	// one product. This replaced the original single-page layout, which is still on the
@@ -23,7 +23,7 @@
 
 <svelte:head><title>RED Pump Monitor — platform · serving</title></svelte:head>
 
-<div class="grid h-screen w-screen grid-rows-[auto_1fr] overflow-hidden">
+<div class="grid h-dvh w-full grid-rows-[auto_1fr] overflow-hidden">
 	<!-- The menubar carries nothing but identity: no status, no controls. -->
 	<Menubar />
 
