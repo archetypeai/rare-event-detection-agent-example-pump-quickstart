@@ -40,13 +40,12 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import mqtt from 'mqtt';
+import { REPO, loadEnv } from './common.js';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Repo-relative by default; overridable so the container can mount them
-// elsewhere (the compose file mounts the data read-only under /data).
-const REPO = path.resolve(HERE, '../..');
+// SLICE, SPEED and the ports from app-serving/.env (.env.example lists them).
+loadEnv();
+// Repo-relative by default; overridable so the data can live elsewhere.
 const PREPARED = process.env.PREPARED_DIR ?? path.join(REPO, 'data/prepared');
 // The quickstart ships no raw file (it's a Kaggle download): the replay is
 // Stage 6's delivery files, already z-scored, with their labels beside them.
@@ -114,6 +113,32 @@ let classified = 0;
 let throttledSince = 0;
 let throttledAt = 0;
 const inflight = () => Math.max(0, published - (WINDOW_SIZE - 1) - classified);
+
+/**
+ * The agent, as the bridge reports it on GET /status, polled. While the bridge is
+ * starting its agent (or replacing a released one, or waiting for a free serving
+ * worker, which can take minutes) the replay holds: rows published then would only
+ * queue in the bridge. A new agent id means the bridge started over, and answers
+ * owed by the old one may never come, so the debt is forgotten. A bridge that
+ * doesn't answer at all is left to the STALL_MS timeout.
+ */
+const agent = { starting: false, id: null };
+async function pollAgent() {
+  try {
+    const s = await (await fetch(`${AGENT_ADMIN}/status`, { signal: AbortSignal.timeout(2000) })).json();
+    const id = s.agent ?? null;
+    if (s.state === 'Running' && agent.id !== null && id !== agent.id) {
+      console.log(`replayer: new agent ${id}; not waiting for the old one's answers`);
+      classified = Math.max(classified, published - (WINDOW_SIZE - 1));
+    }
+    agent.starting = s.state !== 'Running';
+    if (s.state === 'Running') agent.id = id;
+  } catch {
+    agent.starting = false;
+  }
+}
+pollAgent();
+setInterval(pollAgent, 2000);
 
 const sliceById = (id) => SLICES.find((s) => s.id === id) ?? SLICES[0];
 
@@ -264,6 +289,13 @@ function publishRow(row) {
 
 async function tick() {
   if (!state.playing || state.loading || rows.length === 0) return schedule(200);
+
+  if (agent.starting) {
+    if (!state.throttled) { state.throttled = true; publishStatus(); }
+    throttledSince = Date.now();
+    throttledAt = classified;
+    return schedule(200);
+  }
 
   // Hold off while the agent is behind, so the queue can't grow without bound.
   // Bounded wait: if no result arrives at all — agent stopped, or it is still

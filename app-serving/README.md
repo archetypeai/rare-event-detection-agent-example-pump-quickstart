@@ -49,8 +49,12 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
   put back (a served agent numbers the rows 0–63 within a query).
 - **It answers the replayer's admin calls** (`GET /status`, `POST /reset`,
   `POST /start`, `POST /shutdown` on :9101): a seek or incident switch resets the
-  bridge's buffer, so no window mixes two sections. The replayer starts before the agent is up; the bridge holds the
-  windows until it is, and the replayer's flow control waits for them.
+  bridge's buffer, so no window mixes two sections. The bridge sends no query
+  until its agent is running, and the replayer holds the replay while the bridge
+  starts one: at startup, when it replaces a released one, or while all of Dev's
+  serving workers are taken (the bridge retries every 15 s, doubling to 2 min).
+  If answers are lost (the bridge was restarted), the replayer stops waiting for
+  them once a new agent runs, or after 20 s.
 - **The API key never reaches the browser.** The bridge reads `ATAI_API_ENDPOINT`
   and `ATAI_API_KEY` from the repo's `.env`, the same file the Python stages use.
 - **On exit** (Ctrl-C, `npm run stop`) the bridge cancels and deletes its agent and
@@ -183,7 +187,8 @@ The same slot as the full example's `app-serving/`, so run one of the two at a t
 | Path | What |
 |---|---|
 | `scripts/serving-bridge.js` | the agent: broker ↔ serving agent on the platform, the edge runtime's admin API |
-| `scripts/replayer.js` | replays Stage 6's delivery files one at a time, paced by the agent |
+| `scripts/replayer.js` | replays Stage 6's delivery files one at a time, paced by the agent, holding while it starts; reads `app-serving/.env` |
+| `scripts/common.js` | what the two scripts share: the repo path and the `.env` files (the repo's for the key, `app-serving/.env` for the app's settings, where an `ATAI_*` line is ignored) |
 | `scripts/run-broker.sh`, `scripts/stop.sh`, `mosquitto/` | the broker on 1891 / 9009, and stopping everything (matched by `--app red-serving`, so other demos are left alone) |
 | `static/red-embedding-landscape.json` | the recomputed cloud and projection, from `fit/library_embeddings.py` |
 | `src/` | the SvelteKit workbench, on the Archetype AI design system 0.19 (`@archetypeai/ds-lib-tokens` and `ds-ui-svelte-console`, from npm) |

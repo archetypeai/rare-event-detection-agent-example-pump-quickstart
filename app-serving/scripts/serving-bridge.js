@@ -28,7 +28,9 @@
  *   fit/out/app_serving_state.json until then, so `python3 fit/cleanup.py`
  *   finds them after a hard kill. An agent the platform released (20 minutes
  *   without a query, e.g. a paused replay) is deleted and replaced on the next
- *   window: a bundle that still has an agent can't be deleted (409).
+ *   window: a bundle that still has an agent can't be deleted (409). Starting
+ *   one, at startup or as a replacement, retries while all of Dev's serving
+ *   workers are taken (15 s, doubling to 2 min).
  *
  * Env (repo .env): ATAI_API_ENDPOINT (dev only), ATAI_API_KEY.
  * Env (app-serving/.env): MQTT_PORT, AGENT_PORT.
@@ -37,20 +39,9 @@ import mqtt from 'mqtt';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { REPO, loadEnv, readJson } from './common.js';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(HERE, '../..');
-
-function loadDotenv(file) {
-	if (!fs.existsSync(file)) return;
-	for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-		const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-		if (m && !line.trimStart().startsWith('#') && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-	}
-}
-loadDotenv(path.join(HERE, '..', '.env'));
-loadDotenv(path.join(REPO, '.env'));
+loadEnv();
 
 const ENDPOINT = (process.env.ATAI_API_ENDPOINT ?? '').replace(/\/+$/, '').replace(/\/v\d+(\.\d+)*$/, '');
 const KEY = process.env.ATAI_API_KEY;
@@ -72,12 +63,24 @@ if (fs.existsSync(STATE)) {
 	console.error(`bridge: ${path.relative(REPO, STATE)} holds an earlier bridge's agent: run python3 fit/cleanup.py --yes`);
 	process.exit(1);
 }
-const test = JSON.parse(fs.readFileSync(path.join(REPO, 'fit', 'out', 'test_state.json'), 'utf8'));
+const test = readJson(path.join(REPO, 'fit', 'out', 'test_state.json'));
+if (!test?.blueprint?.key) {
+	console.error('bridge: no fit/out/test_state.json: run fit/test.py (Stage 5) first');
+	process.exit(1);
+}
+if (test.endpoint && test.endpoint.replace(/\/+$/, '') !== ENDPOINT) {
+	console.error(`bridge: fit/out/test_state.json is from ${test.endpoint}, not ${ENDPOINT}`);
+	process.exit(1);
+}
 const PROMOTED = test.blueprint.key;
 const SERVED = `${PROMOTED}-served-records`;
 const WINDOW = test.blueprint.values.window_size;
 // The classifier's channel order: the role files', which the replayer publishes in.
-const CHANNELS = JSON.parse(fs.readFileSync(path.join(REPO, 'data', 'roles', 'manifest.json'), 'utf8')).channels;
+const CHANNELS = readJson(path.join(REPO, 'data', 'roles', 'manifest.json'))?.channels;
+if (!CHANNELS) {
+	console.error('bridge: no data/roles/manifest.json: build the role files (Stage 2) first');
+	process.exit(1);
+}
 
 // ------------------------------------------------------------------ the platform
 
@@ -161,6 +164,7 @@ async function dropAgent(id) {
 		}
 	}
 	live.agents = live.agents.filter((a) => a !== id);
+	if (live.agent === id) live.agent = null;
 	save();
 	return true;
 }
@@ -199,18 +203,17 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdow
 process.on('uncaughtException', (e) => { console.error('bridge:', e); shutdown('error'); });
 process.on('unhandledRejection', (e) => { console.error('bridge:', e); shutdown('error'); });
 
-/** Replace a released agent: delete it, then start another, retrying while
- *  Dev's serving workers are all taken. */
-async function replaceAgent() {
+/** Start an agent, retrying while Dev's serving workers are all taken: at
+ *  startup, and to replace one the platform released. */
+async function startWithRetry() {
 	live.running = false;
-	if (live.agent) await dropAgent(live.agent);
 	for (let wait = 15_000; !stopping; wait = Math.min(wait * 2, 120_000)) {
 		try {
 			await startAgent();
 			return;
 		} catch (e) {
 			console.error(`bridge: could not start a serving agent (${e.message}); retrying in ${wait / 1000} s`);
-			if (live.agent && live.agents.includes(live.agent)) await dropAgent(live.agent);
+			if (live.agent) await dropAgent(live.agent);
 			await sleep(wait);
 		}
 	}
@@ -255,7 +258,9 @@ async function drain() {
 			} catch (e) {
 				if (e.status === 409) {
 					console.warn(`bridge: agent ${live.agent} no longer running; replacing it`);
-					await replaceAgent();
+					live.running = false;
+					if (live.agent) await dropAgent(live.agent);
+					await startWithRetry();
 					queue.unshift(job);
 					continue;
 				}
@@ -326,7 +331,7 @@ http.createServer((req, res) => {
 
 try {
 	await ensureServedBlueprint();
-	await startAgent();
+	await startWithRetry();
 } catch (e) {
 	console.error(`bridge: ${e.message}`);
 	await shutdown('startup failure');
