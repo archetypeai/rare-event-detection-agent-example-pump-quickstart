@@ -128,8 +128,9 @@ def main() -> int:
     args = ap.parse_args()
 
     load_dotenv()
-    if "api.dev." not in agents_base():
-        sys.exit("agent serving is on dev only for now (https://api.dev.u1.archetypeai.app)")
+    # Match the deployment generation, not one host: dev is api.dev.* and platform.dev.*
+    if ".dev." not in agents_base():
+        sys.exit("agent serving is on dev only for now (e.g. https://platform.dev.u1.archetypeai.app)")
     bp = load_state(state_path("test")).get("blueprint") or sys.exit("no promoted blueprint: run fit/test.py")
     m = manifest()
     channels, window = m["channels"], bp["values"]["window_size"]
