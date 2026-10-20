@@ -279,11 +279,57 @@ def wait_until_complete(save, output_csv: str, input_csv: str) -> bool:
     return True
 
 
+ARTIFACT_WAIT_S = 600          # how long to wait for artifacts after a run reports completed
+
+
+def artifact_status(item: dict) -> str | None:
+    """An output's own completion status, or None if the platform reports none.
+
+    A run reports `completed` while its artifacts are still being written.
+    Measured: 66 consecutive samples -- about a minute -- with a run reporting
+    completed while one output held 25,504 of an eventual 50,547 bytes.
+    Reading it gives a well-formed file that is simply short, so nothing
+    downstream notices. The console shows the same pairing, run COMPLETED
+    beside artifact PARTIAL.
+    """
+    return (item.get("data", {}).get("file_attributes", {})
+                .get("job_output", {}).get("status"))
+
+
+def complete_results(fetch, wait_s: int = ARTIFACT_WAIT_S) -> list:
+    """The run's outputs, once every one reports complete.
+
+    Needs nothing but the agent id, unlike a content check, which compares the
+    output against the input and so only works for the client that produced
+    the run. An absent status reads as ready, so a deployment that reports
+    none is not blocked; the wait is bounded.
+    """
+    deadline = time.time() + wait_s
+    waited = False
+    while True:
+        items = fetch()
+        pending = [i for i in items if artifact_status(i) not in (None, "complete")]
+        if not pending:
+            if waited:
+                print("  every artifact reports complete")
+            return items
+        if time.time() > deadline:
+            print(f"  WARNING {len(pending)} artifact(s) still incomplete after "
+                  f"{wait_s // 60} min; collecting anyway")
+            return items
+        waited = True
+        print(f"  {len(items) - len(pending)} of {len(items)} artifacts ready; waiting")
+        time.sleep(15)
+
+
 def download_results(agent_id: str, out_path: str, input_csv: str | None = None) -> str | None:
     """Fetch /results and save the first output to out_path; with input_csv, wait
     until the output reaches the input's end (None if it never does)."""
-    results = request("GET", f"{agents_base()}/instances/{agent_id}/results")
-    items = results.get("data", results if isinstance(results, list) else [])
+    def _fetch():
+        r = request("GET", f"{agents_base()}/instances/{agent_id}/results")
+        return r.get("data", r if isinstance(r, list) else [])
+
+    items = complete_results(_fetch)
     if not items:
         print("  no results returned")
         return None
