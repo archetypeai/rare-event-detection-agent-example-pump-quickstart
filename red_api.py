@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -37,10 +38,17 @@ def load_dotenv(path: str = ".env") -> None:
 
 
 def api_base() -> str:
+    """The deployment root with /api appended — every surface lives under it.
+
+    Accepts a bare root, a /vX.Y suffix or /api itself, so one .env works
+    whichever form you have.
+    """
     endpoint = os.environ.get("ATAI_API_ENDPOINT", "").rstrip("/")
     if not endpoint:
         sys.exit("ATAI_API_ENDPOINT is not set")
-    return endpoint
+    endpoint = re.sub(r"/api$", "", endpoint)
+    endpoint = re.sub(r"/v[0-9]+(\.[0-9]+)*$", "", endpoint)
+    return f"{endpoint}/api"
 
 
 def require_key() -> str:
@@ -114,7 +122,7 @@ def request(method: str, url: str, body=None, headers=None, raw: bool = False,
 
 
 def upload_file(path: str, rename: str | None = None) -> dict:
-    """POST a file to /v0.5/files as multipart/form-data."""
+    """POST a file to /api/files as multipart/form-data."""
     boundary = uuid.uuid4().hex
     filename = rename or os.path.basename(path)
     content = open(path, "rb").read()
@@ -125,7 +133,7 @@ def upload_file(path: str, rename: str | None = None) -> dict:
         content,
         f"\r\n--{boundary}--\r\n".encode(),
     ])
-    req = urllib.request.Request(f"{api_base()}/v0.5/files", data=body, method="POST")
+    req = urllib.request.Request(f"{api_base()}/files", data=body, method="POST")
     req.add_header("Authorization", f"Bearer {os.environ['ATAI_API_KEY']}")
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
     try:
@@ -349,12 +357,12 @@ def download_results(agent_id: str, out_path: str, input_csv: str | None = None)
     def save() -> None:
         # A fitted-artifact ref is an absolute presigned S3 URL; a run-output ref
         # is a relative platform path ("/files/download/<name>") that resolves
-        # under /v0.5 and needs the bearer token.
+        # under the /api prefix and needs the bearer token.
         if ref.startswith("http"):
             with urllib.request.urlopen(ref) as resp:
                 payload = resp.read()
         else:
-            payload = request("GET", f"{api_base()}/v0.5{ref}", raw=True)
+            payload = request("GET", f"{api_base()}{ref}", raw=True)
         open(out_path, "wb").write(payload)
 
     save()
