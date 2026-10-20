@@ -59,6 +59,20 @@ def require_key() -> str:
     return key
 
 
+def deployment(endpoint: str) -> str:
+    """What deployment an endpoint addresses, whatever hostname it arrives under.
+
+    api.dev.u1.archetypeai.app and platform.dev.u1.archetypeai.app are one
+    deployment under two names: an agent created through either is visible
+    through the other. So state written through one name has to load through
+    the other. The generation (api, platform) is everything left of the first
+    dot; the rest names the deployment, which still separates dev.u1 from u1
+    from u2.
+    """
+    host = re.sub(r"^[a-z]+://", "", endpoint.strip()).split("/")[0].split(":")[0]
+    return re.sub(r"^(api|platform)\.", "", host).lower()
+
+
 def agents_base() -> str:
     return f"{api_base()}/agents"
 
@@ -211,15 +225,32 @@ def iter_instances(bundle_id: str | None = None, page_size: int = 100):
     and then IGNORED, returning page 1 again — so a wrong guess here is either
     an infinite loop or a silent truncation, never an error.
 
-    There is no server-side bundle filter, so bundle_id is applied client-side.
+    The listing DOES take `bundle_id=`, and the platform validates it (a malformed
+    id answers 400), so one filtered request replaces walking the whole listing.
+    Verified 2026-10-20 on the TEP quickstart: a delivery bundle answered with
+    exactly its five runs and `has_more` false, matching a 37-page scan. If a
+    deployment ever ignores the parameter the rows come back unfiltered, so the
+    filter is dropped the moment a row does not match and the walk continues
+    client-side.
     """
-    after = None
+    after, server_side = None, bundle_id is not None
     while True:
         url = f"{agents_base()}/instances?limit={page_size}"
+        if server_side:
+            url += f"&bundle_id={urllib.parse.quote(bundle_id)}"
         if after:
             url += f"&after={urllib.parse.quote(after)}"
-        page = request("GET", url)
+        try:
+            page = request("GET", url)
+        except SystemExit:
+            if not server_side:
+                raise
+            server_side, after = False, None      # unsupported: walk it instead
+            continue
         rows = page.get("data") or []
+        if server_side and any(r.get("bundle_id") != bundle_id for r in rows):
+            server_side, after = False, None      # ignored: the rows are everyone's
+            continue
         for rec in rows:
             if bundle_id is None or rec.get("bundle_id") == bundle_id:
                 yield rec
