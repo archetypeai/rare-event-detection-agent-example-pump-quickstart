@@ -90,7 +90,10 @@ def score(files: list, ev: dict, preds: list, window: int, step: int) -> dict:
         name = (ROLES / f["file"]).stem
         lab = (pd.read_csv(ROLES / f["file"], usecols=["label"]).label == FAULT).to_numpy()
         starts = list(range(0, len(lab) - window + 1, step))
-        got = sorted(by_ex.get(name, []), key=lambda p: p["row_index"])
+        # The prediction record carries no row_index, and its `input` is 0 on every
+        # row; key.predicted is the window's [start, end] timestamp, so order by
+        # its start.
+        got = sorted(by_ex.get(name, []), key=lambda p: p["key"]["predicted"][0])
         if len(got) != len(starts):
             raise SystemExit(f"{name}: {len(got)} predictions for {len(starts)} windows at "
                              f"window {window}, step {step}")
@@ -102,10 +105,10 @@ def score(files: list, ev: dict, preds: list, window: int, step: int) -> dict:
             n_span = int(span.sum())
             # majority over the span, a tie to the label occurring latest
             g = FAULT if (2 * n_span > len(span) or (2 * n_span == len(span) and span[-1])) else "normal"
-            if p["gold"] != g:
-                raise SystemExit(f"{name} window at row {s}: platform gold {p['gold']}, the label "
+            if p["expected"] != g:
+                raise SystemExit(f"{name} window at row {s}: platform gold {p['expected']}, the label "
                                  f"column says {g} -- predictions are misaligned")
-            if p["abstained"]:
+            if p["outcome"] == "missed" or p["predicted"] is None:
                 abstained += 1
                 continue
             hit = p["predicted"] == FAULT
