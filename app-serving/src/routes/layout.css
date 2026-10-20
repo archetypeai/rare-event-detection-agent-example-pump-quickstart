@@ -1,35 +1,10 @@
-@import "@archetypeai/ds-lib-tokens/theme.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
-@import "tailwindcss";
-@import "tw-animate-css";
-
-/* ---------------------------------------------------------------------------
-   Default border colour. Tailwind v4 dropped v3's preflight rule that made a
-   bare `border` use the theme's border colour; in v4 it falls back to
-   `currentColor`, so any DS component that writes `border` without a colour
-   inherits the text colour instead.
-
-   On this near-black plate that is white. Exactly one element in the app hit it
-   — the Select popover (`select-content` sets `border` and `bg-popover` but no
-   border colour) — which rendered a 1px white outline around the incident menu
-   where the rig monitor draws a near-invisible grey one. Same component, same
-   classes, same tokens; only this base rule was missing, so the two apps' menus
-   did not match.
-
-   Scoped to the element list from Tailwind's own v3→v4 compatibility snippet.
-   `currentColor` stays as the fallback so nothing loses a border if the token
-   ever goes missing.
-   --------------------------------------------------------------------------- */
-@layer base {
-	*,
-	::after,
-	::before,
-	::backdrop,
-	::file-selector-button {
-		border-color: var(--color-border, currentColor);
-	}
-}
+/* theme.css does `@import 'tailwindcss'` itself, so there is no second Tailwind
+   entry here: two drop the DS base layer in dev (its typography, and the
+   `border-border` default a bare `border` relies on). The @source lines make
+   Tailwind emit the classes the console package's components use. */
+@import '@archetypeai/ds-lib-tokens/theme.css';
+@import 'tw-animate-css';
+@source '../../node_modules/@archetypeai/ds-ui-svelte-console/dist';
 
 /* ---------------------------------------------------------------------------
    Draughtsman's ink, copied from osm-rig-monitor. TWO TONES, NO HUES — the whole
@@ -65,12 +40,9 @@
 /* ---------------------------------------------------------------------------
    Platform chip surfaces, copied verbatim from osm-rig-monitor's layout.css so
    the workbench's Run Agent and Settings buttons match the rig monitor's.
-   The DS ships the button VARIANTS (`runAgent`, `agentSettings`) but not these
-   three classes, which is why a copied button renders black-on-transparent —
-   invisible on this plate — until they are present.
-
-   Purely additive: the original route uses none of them, so nothing on / can
-   change. Remove them with the v2 tree if v2 is ever abandoned.
+   The DS ships neither the surfaces nor a variant for them, so the two buttons
+   are the DS Button's ghost variant with these classes on top
+   (playback-controls.svelte, output-panel.svelte).
 
    NOTE ON THEME: these are the platform's LIGHT-surface gradients, copied
    exactly as the rig monitor copied them. On a near-black plate the neutral
