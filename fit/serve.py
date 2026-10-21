@@ -58,15 +58,17 @@ def get_or_none(url: str):
         raise
 
 
-def served_document(src: dict, model: str = MODEL) -> dict:
+def served_document(src: dict) -> dict:
     """The promoted blueprint's document with an atai-records serving source and sink, at step 1."""
     doc = copy.deepcopy(src["document"])
     doc.pop("blueprint_id", None)
     doc["values"]["step_size"] = 1
-    endpoint = {"format": "serving", "kind": "http", "protocols": ["atai-records"]}
+    # The platform fills in protocols and models for a served blueprint and
+    # rejects the document outright if we set them ourselves.
+    endpoint = {"format": "serving", "kind": "http"}
     doc["connectors"] = {
         "source": {"key": "RecordsSource", "config": {
-            **endpoint, "models": [model],
+            **endpoint,
             "data_columns": [{"dtype": "f32", "names": doc["values"]["data_columns"]}],
             "timestamp_column": doc["values"]["timestamp_column"]}},
         "sink": {"key": "RecordsSink", "config": dict(endpoint)},
