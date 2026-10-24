@@ -27,7 +27,7 @@
 | 5 | **promote** the best to a blueprint, **test** it once with the Evals API | 4 min |
 | 6 | **deliver:** a bundle from that blueprint, run over the delivery files | 1 min |
 | 7 | **score** the delivery against the held-back labels | seconds |
-| 8 | **serve** it a window per query over `/query` (agent serving, Dev only), checked against Stage 6 | 7 min |
+| 8 | **serve** it a window per query over `/query` (agent serving, Dev and Staging only), checked against Stage 6 | 7 min |
 | 9 | **watch it live** (optional): the pump monitor in `app-serving/`, its agent served from the platform | as long as you like |
 
   About **10 minutes** end to end through Stage 7, 8 of them on the platform; serving (Stage 8) adds 7 minutes. Platform times
@@ -352,14 +352,15 @@ python3 fit/serve.py --windows-per-query 16   # up to 16 windows per query
 Stage 6 delivers in batch: upload a file, run an agent, read the output when the
 run is done. **Agent serving** keeps an agent loaded and answers a window in one
 round trip, as the pump's historian would ask it every minute for the latest 64
-readings. It is on Dev only, for first tests, with 3 serving workers shared by
-everyone; the [agent-serving example](https://github.com/archetypeai/agent-serving-example)
+readings. It is on Dev and Staging only, for first tests (Dev has 3 serving
+workers shared by everyone); the [agent-serving example](https://github.com/archetypeai/agent-serving-example)
 has the calls.
 
-1. **Served blueprint:** a copy of Stage 5's (`<key>-served-records`, made once):
-   the same prototypes, encoder and values, at step 1, with its CSV source and sink
-   swapped for an `atai-records` serving endpoint.
-2. **Serving agent:** a bundle of it, run with `{"mode": "serving"}`.
+1. **Serving bundle:** a bundle of Stage 5's promoted blueprint itself, with
+   values `{step_size: 1}`. Run in serving mode, the platform supplies the serving
+   connectors in place of the blueprint's CSV source and sink, so no copy of the
+   blueprint is made (creating one needs the admin role on Staging).
+2. **Serving agent:** that bundle, run with `{"mode": "serving"}`.
 3. **Replay:** every window ending within 2 hours of each breakdown (`--context
    120` rows), one query each, holding the latest 64 rows of the 10 channels. The
    agent keeps nothing between queries, so a query carries the whole window.
@@ -413,7 +414,7 @@ answers come back. The API key stays in the bridge, never in the browser.
   1,023 windows, came back with every state and probability identical to
   `eval_out/delivery/red-output-inc04.csv`, at 301 ms a query: the incident plays
   in about 6 minutes.
-- **Dev only, one serving worker while it runs.** `npm run stop` deletes the
+- **Dev and Staging only, one serving worker while it runs.** `npm run stop` deletes the
   bridge's agent and bundle.
 
 ### Clean up the platform
@@ -427,12 +428,13 @@ It deletes, from the ids in `fit/out/`, Stage 6's 2 delivery agents and their
 bundle (their outputs are in `eval_out/delivery/`), Stage 9's 3 library agents and
 their bundle (the view is in `app-serving/static/`), and a serving agent and its
 bundle if `fit/serve.py` or `app-serving/` was killed before its own cleanup
-(`kill -9`, a closed laptop): a running serving agent holds one of Dev's 3 serving
-workers until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
+(`kill -9`, a closed laptop): a running serving agent holds a serving worker (Dev
+has 3) until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
 bundle that still has one answers 409); an id already gone counts as done.
 
-**What stays:** the promoted blueprint and its served copy (deleting a blueprint
-needs an org admin's key), and the optimization and eval this README cites.
+**What stays:** the promoted blueprint, and the optimization and eval this README
+cites. A served copy (`<key>-served-records`) is only left by earlier versions of
+`fit/serve.py` and `app-serving/`; `fit/cleanup.py` deletes it.
 After a cleanup, rerunning `fit/deliver.py` needs `fit/out/deliver_state.json`
 moved aside: its bundle is gone.
 
@@ -485,9 +487,9 @@ the expected outputs above show at which stage.
 | `fit/test.py` | Stage 5 |
 | `fit/deliver.py` | Stage 6, then Stage 7's scoring |
 | `fit/evaluate_events.py` | Stage 7 |
-| `fit/serve.py` | Stage 8: the served blueprint, a serving agent, a query per window, every answer checked against Stage 6. Dev only |
+| `fit/serve.py` | Stage 8: a serving bundle of the promoted blueprint, a serving agent, a query per window, every answer checked against Stage 6. Dev and Staging only |
 | `fit/library_embeddings.py` | Stage 9: the training windows' embeddings, recomputed in batch, and their PCA for `app-serving/` |
-| `app-serving/` | Stage 9: the live pump monitor, its agent served from the platform ([`app-serving/README.md`](app-serving/README.md)). Dev only |
+| `app-serving/` | Stage 9: the live pump monitor, its agent served from the platform ([`app-serving/README.md`](app-serving/README.md)). Dev and Staging only |
 | `fit/cleanup.py` | the agents and bundles of Stages 6, 8 and 9, from the ids in `fit/out/`; dry run unless `--yes` |
 | `data/prepared/` | Stage 1's output: training files, slices and label sidecars, z-score stats, `prep_report.json` (Git LFS) |
 | `data/roles/` | Stage 2's output: the role files and labels Stages 3–7 read (Git LFS) |

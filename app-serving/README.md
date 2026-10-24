@@ -5,9 +5,11 @@ as if the pump were running now, and every window goes to a **serving agent** of
 the classifier Stage 5 promoted, on the Archetype AI platform. The answers come
 back to the sensor traces, the verdict, a timeline and an embedding space.
 
-> **Dev only.** Agent serving is on `https://api.dev.u1.archetypeai.app` for first
-> internal tests. Dev has **3 serving workers for everyone**: this app holds one
-> while it runs, and gives it back when you stop it.
+> **Dev and Staging only.** Agent serving is on Dev
+> (`https://platform.dev.u1.archetypeai.app`) and Staging
+> (`https://platform.stage.u1.archetypeai.app`) for first internal tests. Dev has
+> **3 serving workers for everyone**: this app holds one while it runs, and gives
+> it back when you stop it.
 
 It is the same app as the [full example's
 `app-serving/`](https://github.com/archetypeai/rare-event-detection-agent-example/tree/main/app-serving),
@@ -26,7 +28,7 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
 ┌───────────────────────────┐  GET /status    ┌──────────────────────────────┐          │
 │ replayer (node)           │  POST /reset    │ serving bridge (node)        │◀─────────┘
 │ one delivery file at a    │  POST /start    │ the API key stays here;      │   POST /query   ┌──────────────────────────┐
-│ time, data-time pace,     │────────────────▶│ keeps the last 64 rows,      │────────────────▶│ serving agent (Dev)      │
+│ time, data-time pace,     │────────────────▶│ keeps the last 64 rows,      │────────────────▶│ serving agent (Dev/Stg)  │
 │ holds off while the agent │  admin :9101    │ one query per row (step 1)   │  the latest 64  │ promoted classifier,     │
 │ catches up                │                 │                              │  rows           │ atai-records,            │
 └───────────────────────────┘                 └──────────────────────────────┘◀────────────────│ embeddings on            │
@@ -41,9 +43,9 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
 ```
 
 - **The serving bridge** (`scripts/serving-bridge.js`) is the agent's local end.
-  On start it makes sure the served copy of
-  the promoted blueprint exists (`…-served-records`, the one Stage 8 uses), creates
-  a bundle with `output_embeddings: true` and starts a serving agent. Then, for
+  On start it creates a bundle of the promoted blueprint itself, with values
+  `{step_size: 1, output_embeddings: true}`, and starts it as a serving agent; the
+  platform supplies the serving connectors, as for Stage 8. Then, for
   every row, it sends the latest 64 rows as one query and publishes the answer on
   `red/results`, with the window's timestamps
   put back (a served agent numbers the rows 0–63 within a query).
@@ -51,7 +53,7 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
   `POST /start`, `POST /shutdown` on :9101): a seek or incident switch resets the
   bridge's buffer, so no window mixes two sections. The bridge sends no query
   until its agent is running, and the replayer holds the replay while the bridge
-  starts one: at startup, when it replaces a released one, or while all of Dev's
+  starts one: at startup, when it replaces a released one, or while all the
   serving workers are taken (the bridge retries every 15 s, doubling to 2 min).
   If answers are lost (the bridge was restarted), the replayer stops waiting for
   them once a new agent runs, or after 20 s.
@@ -61,7 +63,7 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
   deletes its bundle. If it's killed hard, the ids are still in
   `fit/out/app_serving_state.json`, and `python3 fit/cleanup.py --yes` removes them.
   An agent the platform released after 20 minutes without a query (a replay paused
-  that long) is deleted and replaced on the next window, retrying while Dev's
+  that long) is deleted and replaced on the next window, retrying while the
   serving workers are all taken. If anything can't be deleted on exit, the bridge
   says so and keeps the ids for `fit/cleanup.py`. See
   [Stop and clean up](#stop-and-clean-up).
@@ -93,7 +95,7 @@ the classifier fits one mean per class, but its own vectors can't be read.
 ## Run it
 
 Prerequisites: Node 20+, `brew install mosquitto`, `git lfs pull`, and Stages 4–6
-run on Dev (`fit/out/test_state.json` names the promoted blueprint). In the
+run on Dev or Staging (`fit/out/test_state.json` names the promoted blueprint). In the
 [repo README](../README.md) this is Stage 9. Then:
 
 ```sh
@@ -116,7 +118,7 @@ so every verdict is the one Stage 6 delivered.
 
 ## Stop and clean up
 
-A running app holds a serving agent on Dev, and so one of its 3 serving workers,
+A running app holds a serving agent, and so one serving worker (Dev has 3),
 until the bridge deletes the agent or the platform releases it after 20 minutes
 without a query. Closing the browser tab does not stop it.
 

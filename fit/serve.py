@@ -11,10 +11,11 @@ round trip, as a pump's historian would ask it every minute for the latest 64
 readings. This replays delivery files that way and checks every answer against
 the batch output for the same window:
 
-  1. the served variant of fit/test.py's promoted blueprint, made once and reused
-     (`<key>-served-records`): the same prototypes, encoder and values, step 1,
-     with the CSV source and sink swapped for an `atai-records` serving endpoint;
-  2. a bundle of it, run in serving mode;
+  1. a bundle of fit/test.py's promoted blueprint, as it is, at step 1 (bundle
+     values override a blueprint's): the platform supplies the serving
+     connectors when it runs a bundle in serving mode, so no served copy of the
+     blueprint is made (atai_core #7286; creating one takes the admin role);
+  2. that bundle run in serving mode;
   3. each file replayed one row at a time: every query holds the latest
      `window_size` rows (`--windows-per-query N` sends N windows at once). By
      default only the windows ending within --context rows of the breakdown;
@@ -26,14 +27,13 @@ the batch output for the same window:
      (Ctrl-C, SIGTERM and SIGHUP included). Their ids stay in
      fit/out/serve_state.json until then, so fit/cleanup.py finds them after a kill.
 
-Dev only, like serving (https://github.com/archetypeai/agent-serving-example).
+Dev and Staging only, like serving (https://github.com/archetypeai/agent-serving-example).
 A served agent keeps no window between queries, so a query must carry the whole
 window. Writes eval_out/serving/.
 """
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import signal
 import statistics
@@ -47,48 +47,6 @@ from atai import REPO, ROLES, agents_base, load_dotenv, load_state, log, manifes
 MODEL = "red-pump"               # the name a query gives in `model`
 FAULT = "pump_breakdown"
 OUT = REPO / "eval_out" / "serving"
-
-
-def get_or_none(url: str):
-    try:
-        return request("GET", url)
-    except SystemExit as e:
-        if "(404)" in str(e):
-            return None
-        raise
-
-
-def served_document(src: dict) -> dict:
-    """The promoted blueprint's document with an atai-records serving source and sink, at step 1."""
-    doc = copy.deepcopy(src["document"])
-    doc.pop("blueprint_id", None)
-    doc["values"]["step_size"] = 1
-    # The platform fills in protocols and models for a served blueprint and
-    # rejects the document outright if we set them ourselves.
-    endpoint = {"format": "serving", "kind": "http"}
-    doc["connectors"] = {
-        "source": {"key": "RecordsSource", "config": {
-            **endpoint,
-            "data_columns": [{"dtype": "f32", "names": doc["values"]["data_columns"]}],
-            "timestamp_column": doc["values"]["timestamp_column"]}},
-        "sink": {"key": "RecordsSink", "config": dict(endpoint)},
-    }
-    doc["name"] = f"{src['name']} (served, records)"
-    return doc
-
-
-def served_blueprint(promoted: str) -> str:
-    """The atai-records served variant of `promoted`, created once."""
-    key = f"{promoted}-served-records"
-    if get_or_none(f"{agents_base()}/blueprints/{key}"):
-        return key
-    src = request("GET", f"{agents_base()}/blueprints/{promoted}")
-    doc = served_document(src)
-    bp = request("POST", f"{agents_base()}/blueprints", body={
-        "blueprint_key": key, "name": doc["name"], "document": doc,
-        "description": f"{promoted} served with atai-records, step 1."})
-    log(f"created served blueprint {key} ({bp['id']})")
-    return key
 
 
 def episode(labels: list[str]) -> tuple[int, int] | None:
@@ -130,9 +88,10 @@ def main() -> int:
     args = ap.parse_args()
 
     load_dotenv()
-    # Match the deployment generation, not one host: dev is api.dev.* and platform.dev.*
-    if ".dev." not in agents_base():
-        sys.exit("agent serving is on dev only for now (e.g. https://platform.dev.u1.archetypeai.app)")
+    # Match the deployment, not one host: dev is api.dev.* and platform.dev.*, staging platform.stage.*
+    if not any(d in agents_base() for d in (".dev.", ".stage.")):
+        sys.exit("agent serving is on dev and staging only for now "
+                 "(e.g. https://platform.dev.u1.archetypeai.app, https://platform.stage.u1.archetypeai.app)")
     bp = load_state(state_path("test")).get("blueprint") or sys.exit("no promoted blueprint: run fit/test.py")
     m = manifest()
     channels, window = m["channels"], bp["values"]["window_size"]
@@ -158,12 +117,12 @@ def main() -> int:
     wpq = max(1, min(args.windows_per_query, 16))
     log(f"{len(plan)} file(s), {sum(p[5] for p in plan):,} windows, {wpq} per query; model {bp['key']}")
 
-    key = served_blueprint(bp["key"])
     live = state_path("serve")
     state = load_state(live)
     if state.get("bundle"):
         sys.exit(f"{live} holds an earlier replay's agent and bundle: run fit/cleanup.py first")
-    state["bundle"] = request("POST", f"{agents_base()}/bundles", body={"blueprint": key, "name": "RED serve"})["id"]
+    state["bundle"] = request("POST", f"{agents_base()}/bundles", body={
+        "blueprint": bp["key"], "name": "RED serve", "values": {"step_size": 1}})["id"]
     save_state(live, state)
     served, latency = {}, []
     t_start = time.time()
@@ -232,7 +191,7 @@ def main() -> int:
     df.to_csv(stem.with_suffix(".csv"), index=False)
     ms = sorted(x * 1000 for x in latency)
     p_diff = pd.concat([(df.served_p_fault - df.batch_p_fault).abs(), (df.served_p_normal - df.batch_p_normal).abs()])
-    summary = {"blueprint": bp["key"], "served_blueprint": key, "files": per_file,
+    summary = {"blueprint": bp["key"], "files": per_file,
                "windows": len(df), "windows_per_query": wpq, "queries": len(latency),
                "same_state": int(df.same_state.sum()), "same_p": int(df.same_p.sum()),
                "max_p_diff": float(p_diff.max()), "invalid": int(df.served_invalid.sum()),
