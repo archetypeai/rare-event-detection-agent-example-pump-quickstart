@@ -1,9 +1,9 @@
 {
- "endpoint": "https://api.dev.u1.archetypeai.app",
- "blueprint": "red-pump-otr_3ettyhtcr89s7rrwt6b8qqam8f",
- "bundle": "bnd_7wm1xtf24h94krgtgmkv4zzgh8",
+ "endpoint": "https://platform.u1.archetypeai.app/api",
+ "blueprint": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
+ "bundle": "bnd_09ka9a67m58za8xt2sg4qbjek0",
  "agents": {
-  "inc04": "agt_5e4da2hhs8905tybxqkr48k6fa",
-  "inc07": "agt_0twe1fs0ab9watnsv1m4v30zr0"
+  "inc07": "agt_2mknssxj1r96097cmq96dfb6ag",
+  "inc04": "agt_04jyz32d6e9vssvc83hcerbnxw"
  }
 }
