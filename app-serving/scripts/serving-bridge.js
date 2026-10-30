@@ -3,7 +3,7 @@
  * and a serving agent of the promoted RED classifier.
  *
  * In app/ the agent is `agent_edge_runtime` on this laptop, subscribed to the
- * broker. Here the agent runs on the platform (Dev's agent serving), and this
+ * broker. Here the agent runs on the platform (agent serving), and this
  * process stands where the runtime stood:
  *
  *   sensors/red ──► bridge: the latest 64 rows ──POST /query──► serving agent
@@ -23,16 +23,16 @@
  *   GET /status reports `Running` once the serving agent is, POST /reset drops
  *   the buffer and anything queued (a seek or incident switch), POST /start is
  *   a no-op, POST /shutdown cleans up and exits (scripts/stop.sh calls it).
- * - ONE SERVING WORKER, HELD WHILE THIS RUNS. Dev has 3 for everyone. On exit
+ * - ONE SERVING WORKER, HELD WHILE THIS RUNS. On exit
  *   the agents are cancelled and deleted, and the bundle deleted; the ids sit in
  *   fit/out/app_serving_state.json until then, so `python3 fit/cleanup.py`
  *   finds them after a hard kill. An agent the platform released (20 minutes
  *   without a query, e.g. a paused replay) is deleted and replaced on the next
  *   window: a bundle that still has an agent can't be deleted (409). Starting
- *   one, at startup or as a replacement, retries while all of Dev's serving
+ *   one, at startup or as a replacement, retries while all the serving
  *   workers are taken (15 s, doubling to 2 min).
  *
- * Env (repo .env): ATAI_API_ENDPOINT (dev or staging), ATAI_API_KEY.
+ * Env (repo .env): ATAI_API_ENDPOINT, ATAI_API_KEY.
  * Env (app-serving/.env): MQTT_PORT, AGENT_PORT.
  */
 import mqtt from 'mqtt';
@@ -54,11 +54,6 @@ const ENDPOINT = ROOT ? `${ROOT}/api` : '';
 const KEY = process.env.ATAI_API_KEY;
 if (!ENDPOINT || !KEY) {
 	console.error('bridge: set ATAI_API_ENDPOINT and ATAI_API_KEY in the repo .env');
-	process.exit(1);
-}
-// Match the deployment, not one host: dev is api.dev.* and platform.dev.*, staging platform.stage.*
-if (!['.dev.', '.stage.'].some((d) => ROOT.includes(d))) {
-	console.error(`bridge: ${ENDPOINT}: agent serving is on dev and staging only for now`);
 	process.exit(1);
 }
 const MQTT_PORT = Number(process.env.MQTT_PORT ?? 1891);
