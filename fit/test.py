@@ -19,9 +19,9 @@ example) and:
     record once: a window answers only for the rows since the previous window
     ended (all its rows for the first), so at step 1 a window's gold is its last
     row's label, whatever `downsampling` says;
-  * scores it again as fit/evaluate_events.py and the design doc do -- each
+  * scores it again as fit/evaluate_events.py and the design rule do -- each
     window labelled by the majority of all its rows, ties to the fault -- so the
-    result compares with the archived reference;
+    result compares with fit/evaluate_events.py's;
   * scores each incident: detected or missed, the delay after onset, and false
     alarms on windows with no fault row.
 

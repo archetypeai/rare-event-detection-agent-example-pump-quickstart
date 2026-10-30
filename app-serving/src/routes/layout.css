@@ -7,7 +7,7 @@
 @source '../../node_modules/@archetypeai/ds-ui-svelte-console/dist';
 
 /* ---------------------------------------------------------------------------
-   Draughtsman's ink, copied from osm-rig-monitor. TWO TONES, NO HUES — the whole
+   Draughtsman's ink, as in the OSM rig monitor. TWO TONES, NO HUES — the whole
    point of the rig plate's palette, and the reason it reads as a drawing rather
    than a wiring diagram. `stone` is the DS's warm neutral ramp, so the ink reads
    as ink rather than as another grey UI line.
@@ -38,7 +38,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Platform chip surfaces, copied verbatim from osm-rig-monitor's layout.css so
+   Platform chip surfaces, the same as the OSM rig monitor's so
    the workbench's Run Agent and Settings buttons match the rig monitor's.
    The DS ships neither the surfaces nor a variant for them, so the two buttons
    are the DS Button's ghost variant with these classes on top

@@ -340,7 +340,7 @@ def main() -> None:
         print(f"   pump_quick_test.csv: {q_hi - q_lo:,} rows")
 
     # --- 7. Window-size feasibility --------------------------------------
-    # A window is labelled by the design doc's majority rule, so an incident
+    # A window is labelled by the majority rule, so an incident
     # shorter than half a window can never be labelled as the fault. This is
     # what bounds the usable window size from above.
     print("── window-size feasibility (design-doc majority labelling)")

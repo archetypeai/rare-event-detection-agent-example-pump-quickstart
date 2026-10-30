@@ -18,7 +18,7 @@
     back, the way an operator would run the agent.
 - **The lifecycle:**
 
-| stage | what happens | time (measured 2026-10-13) |
+| stage | what happens | time |
 |---|---|---|
 | 0 | download the dataset (12 MB zipped) from Kaggle | your connection |
 | 1a–1c | check the raw data, prepare it, check again | ~6 s |
@@ -30,9 +30,9 @@
 | 8 | **serve** it a window per query over `/query` (agent serving), checked against Stage 6 | 10 min |
 | 9 | **watch it live** (optional): the pump monitor in `app-serving/`, its agent served from the platform | as long as you like |
 
-  About **10 minutes** end to end through Stage 7, 8 of them on the platform; serving (Stage 8) adds 7 minutes. Platform times
-  vary with load: the same agent runs went at ~4 windows a second that morning
-  and ~50 by the afternoon, which would make Stage 6 about 20 minutes.
+  About **10 minutes** end to end through Stage 7, 8 of them on the platform; serving (Stage 8) adds 10 minutes. Platform times
+  vary with load: we have seen the same agent runs go at ~4 windows a second
+  and at ~50, which would make Stage 6 about 20 minutes.
 
 - **Skip the download:** Stage 1's prepared files and the role files are in the
   repo, in Git LFS. See [Shortcuts](#shortcuts-skip-the-download).
@@ -231,7 +231,7 @@ then the ranking. Ours:
 otr_…  completed {"metric": "dot"}     foreground_macro_f1 0.8588  macro_f1 0.9161  detection_recall 0.9216  detection_precision 0.8040
 otr_…  completed {"metric": "cosine"}  foreground_macro_f1 0.8474  macro_f1 0.9091  detection_recall 0.9238  detection_precision 0.7826
 otr_…  completed {"metric": "l2"}      foreground_macro_f1 0.8400  macro_f1 0.9046  detection_recall 0.9238  detection_precision 0.7702
-otr_…  completed {"metric": "l1"}      foreground_macro_f1 0.8328  macro_f1 0.9001  detection_recall 0.9238  detection_precision 0.7581
+otr_…  completed {"metric": "l1"}      foreground_macro_f1 0.8325  macro_f1 0.8999  detection_recall 0.9238  detection_precision 0.7577
 ```
 
 `dot` wins: of the 1,313 breakdown windows it catches 1,210 (recall 0.92), and
@@ -432,13 +432,11 @@ until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
 bundle that still has one answers 409); an id already gone counts as done.
 
 **What stays:** the promoted blueprint, and the optimization and eval this README
-cites. A served copy (`<key>-served-records`) is only left by earlier versions of
-`fit/serve.py` and `app-serving/`; `fit/cleanup.py` deletes it.
-After a cleanup, rerunning `fit/deliver.py` needs `fit/out/deliver_state.json`
+cites. After a cleanup, rerunning `fit/deliver.py` needs `fit/out/deliver_state.json`
 moved aside: its bundle is gone.
 
-To see which serving agents are running (yours and anyone's on the same
-workers), filter by status on the server and by mode client-side
+To see which of your serving agents are running, filter by status on the
+server and by mode client-side
 (`mode=serving` is ignored by the server):
 
 ```sh
@@ -451,27 +449,22 @@ curl -s "$ATAI_API_ENDPOINT/agents/instances?status=running&limit=100" -H "Autho
 
 | stage | measure | ours |
 |---|---|---|
-| 1–3 | prepared and role files | byte-identical to the full example's; every role check passed |
-| 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8328: the full example's, to four decimals |
-| 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60): the full example's |
+| 1–3 | prepared and role files | every role check passed |
+| 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 |
+| 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60) |
 | 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) |
-| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 348 ms a query |
-| 9 | the live monitor, breakdown #4's demo window (1,023 windows) | every state and probability identical to Stage 6; 301 ms a query |
+| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 436 ms a query |
+| 9 | the live monitor, breakdown #4's demo window (1,023 windows) | served from the platform, the same windows as Stage 8 |
 
-Prep, Optimize and Evals are deterministic here: this run, from fresh uploads,
-a new optimization and a new promoted blueprint, matches the full example's to
-the last digit. We ran Stages 4–7 twice from scratch; the second run's 37,623
-test predictions and both delivery outputs are byte-identical to the first's,
-and only the platform ids differ (`fit/out/` holds the second). If yours differs, something differs in your data or setup, and
-the expected outputs above show at which stage.
-
-## What's left out, compared with the full example
-
-| full example | here | why |
-|---|---|---|
-| delivery of all four test breakdowns and five weeks of normal operation after them | breakdowns #4 and #7, short context | time: ~87,000 windows instead of ~4,700, hours of agent runs at the rates measured that day |
-| a 12-point search over windows 16–64, a check of 48 and 80, and a random search | the 4 metrics at window 64 | the window search found window 64 and cost more platform time; the winner is the same |
-| the first design: a local grid with Omega 1.5, `red-fitting`, an `s3://` classifier; a live on-device app | none | |
+`fit/out/`, `eval_out/` and the numbers above are our run on production
+(Stages 4–7 on 2026-10-28, 8–9 on 2026-10-29). Prep, Optimize and Evals are
+close to deterministic here: runs from scratch, with fresh uploads, a new
+optimization and a new promoted blueprint, gave byte-identical test predictions
+and delivery outputs, and only the platform ids differed. The one difference
+we have seen is a near tie: `l1` once scored 0.8328 rather than 0.8325, two
+windows of ~7,600, with no change to the ranking. If yours differs by more,
+something differs in your data or setup, and the expected outputs above show
+at which stage.
 
 ## Repo layout
 

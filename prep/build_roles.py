@@ -18,7 +18,7 @@ Slices keep EVAL_CONTEXT normal rows either side of their incident, cut at the
 midpoint where two incidents are closer than that, so no row is in two of
 training, validation and test. Delivery re-runs two test incidents, #4 (606 rows)
 and #7 (76 rows), with DELIVERY_CONTEXT rows either side: inside their test
-slices, so ~4,650 windows instead of the full example's ~87,000.
+slices, so ~4,650 windows instead of the test's ~37,600.
 """
 import argparse
 import json
