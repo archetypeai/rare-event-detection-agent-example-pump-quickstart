@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Minimal stdlib-only client for the Archetype AI Agent API.
 
-Shared by run_red_fit.py (build phase) and run_red_example.py (inference).
-Auth and endpoint come from the environment, with a local .env loaded if
+Shared by fit/ and prep/. Auth and endpoint come from the environment, with a local .env loaded if
 present: ATAI_API_KEY, ATAI_API_ENDPOINT.
 """
 from __future__ import annotations
@@ -17,14 +16,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-
-# The JOS bucket backing job outputs on dev. A fitted classifier lands at a
-# fixed convention path under it; the /results endpoint hands back a presigned
-# URL instead, which expires and so cannot be used as a bundle artifact.
-JOS_S3_BUCKET = "atai-platform-dev-platform-data-us-west-2"
-JOS_OUTPUT_TEMPLATE = ("s3://{bucket}/jos/jobs/{job_id}/agent/worker-0/"
-                       "outputs/output/{filename}")
-
 
 def load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
@@ -62,12 +53,11 @@ def require_key() -> str:
 def deployment(endpoint: str) -> str:
     """What deployment an endpoint addresses, whatever hostname it arrives under.
 
-    api.dev.u1.archetypeai.app and platform.dev.u1.archetypeai.app are one
+    api.u1.archetypeai.app and platform.u1.archetypeai.app are one
     deployment under two names: an agent created through either is visible
     through the other. So state written through one name has to load through
     the other. The generation (api, platform) is everything left of the first
-    dot; the rest names the deployment, which still separates dev.u1 from u1
-    from u2.
+    dot; the rest names the deployment, which still separates u1 from u2.
     """
     host = re.sub(r"^[a-z]+://", "", endpoint.strip()).split("/")[0].split(":")[0]
     return re.sub(r"^(api|platform)\.", "", host).lower()
@@ -80,18 +70,13 @@ def agents_base() -> str:
 def bundles_url(bundle_id: str | None = None, suffix: str = "") -> str:
     """URL for the bundles collection, one bundle, or a sub-path of one.
 
-    The collection is PLURAL. It was `/agents/bundle` until the API renamed it,
-    and the singular path is gone rather than aliased, so this is a 404 not a
-    redirect. Every bundle URL in this repo goes through here so the next rename
-    is one edit.
+    The collection is PLURAL; `run` stays singular. Every bundle URL in this
+    repo goes through here so a rename is one edit.
 
-    Verified against dev (api.dev.u1) on 2026-08-14:
-
-      POST /agents/bundles              create a bundle   (was /agents/bundle)
-      GET  /agents/bundles/{id}         re-read a bundle  (was /agents/bundle/{id})
-      POST /agents/bundles/{id}/run     start a run       — `run` stays SINGULAR
+      POST /agents/bundles              create a bundle
+      GET  /agents/bundles/{id}         re-read a bundle
+      POST /agents/bundles/{id}/run     start a run
       GET  /agents/bundles?limit=1      200 {data, has_more, next_cursor}
-      GET  /agents/bundle?limit=1       404 — the old prefix really is gone
 
     There is no `/agents/bundles/{id}/runs`. To list a bundle's runs, filter
     GET /agents/instances by bundle_id — see iter_instances(), and note that
@@ -157,42 +142,6 @@ def upload_file(path: str, rename: str | None = None) -> dict:
         sys.exit(f"upload of {path} failed ({e.code}): {e.read().decode(errors='replace')}")
 
 
-# Since the 2026-10-12 re-seed the `red` blueprint's head is the empty model
-# slot `classification_head` (an optimization fills it), and nothing is read from
-# a classifier's own metadata: window, metric, columns, `events` and `background`
-# all come from values (window 1024, metric l1 and no events by default). A
-# bundle that brings its own classifier names it in `artifacts`, points the slot
-# at it, and pins everything the classifier was fit with.
-CLASSIFIER_SLOT = "classification_head"
-CLASSES = ["normal", "pump_breakdown"]
-
-
-def classifier_bundle(name: str, classifier: str, input_csv: str, window_size: int,
-                      metric: str, step_size: int, artifact_key: str = "red-classifier") -> dict:
-    """The body of POST /agents/bundles for the canonical `red` blueprint with an
-    `s3://` classifier fitted at `window_size` / `metric` on `input_csv`'s columns."""
-    with open(input_csv, newline="") as fh:
-        header = next(csv.reader(fh))
-    return {"blueprint": "red", "name": name,
-            "values": {"timestamp_column": header[0], "data_columns": header[1:],
-                       "window_size": window_size, "step_size": step_size, "metric": metric,
-                       "events": CLASSES, "background": CLASSES[0]},
-            "models": {CLASSIFIER_SLOT: artifact_key},
-            "artifacts": {artifact_key: classifier}}
-
-
-def blueprint_must_exist(key: str) -> None:
-    req = urllib.request.Request(f"{agents_base()}/blueprints/{key}")
-    req.add_header("Authorization", f"Bearer {os.environ['ATAI_API_KEY']}")
-    try:
-        with urllib.request.urlopen(req):
-            return
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            sys.exit(f"blueprint '{key}' is not registered in your org — ask an org admin.")
-        raise
-
-
 def poll_agent(agent_id: str, timeout_s: int, interval_s: int = 20) -> str:
     """Poll until terminal, streaming new audit events as they appear."""
     agents = agents_base()
@@ -220,15 +169,14 @@ def iter_instances(bundle_id: str | None = None, page_size: int = 100):
     so a bundle with more runs than one page silently downloads a subset and
     nothing looks wrong.
 
-    The cursor parameter is `after`. Verified on dev 2026-08-14: `cursor`,
+    The cursor parameter is `after`. `cursor`,
     `next_cursor`, `starting_after` and `page_cursor` are all accepted with 200
     and then IGNORED, returning page 1 again — so a wrong guess here is either
     an infinite loop or a silent truncation, never an error.
 
     The listing DOES take `bundle_id=`, and the platform validates it (a malformed
     id answers 400), so one filtered request replaces walking the whole listing.
-    Verified 2026-10-20 on the TEP quickstart: a delivery bundle answered with
-    exactly its five runs and `has_more` false, matching a 37-page scan. If a
+    A delivery bundle answers with exactly its runs and `has_more` false. If a
     deployment ever ignores the parameter the rows come back unfiltered, so the
     filter is dropped the moment a row does not match and the walk continues
     client-side.
@@ -261,18 +209,8 @@ def iter_instances(bundle_id: str | None = None, page_size: int = 100):
             return
 
 
-def jos_job_id(agent_id: str) -> str | None:
-    """The JOS job id, read straight off the instance record.
-
-    This used to scrape the audit events for "dispatched to JOS as job_…". The
-    id is now a first-class `job_id` field on the instance, so the regex (and
-    its dependence on log wording) is gone.
-    """
-    return request("GET", f"{agents_base()}/instances/{agent_id}").get("job_id")
-
-
 # The platform can report a run completed while its output file is still being
-# written (a known issue, seen in the TEP example's deliveries), so the output
+# written (a known issue), so the output
 # counts as complete only once its last window ends at the input's end: within
 # one window span (an output row's finish - start) plus a minute. The same check
 # as the agent-skills RED and AD skills.

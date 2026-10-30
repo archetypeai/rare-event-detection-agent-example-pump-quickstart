@@ -5,9 +5,8 @@
 	import OutputPanel from '$lib/components/ui/custom/output-panel.svelte';
 	import SettingsDialog from '$lib/components/ui/custom/settings-dialog.svelte';
 
-	// RED Pump Monitor rebuilt on osm-rig-monitor's workbench, so the two demos read as
-	// one product. This replaced the original single-page layout, which is still on the
-	// main branch if its pump plate or observability panel is ever wanted back.
+	// RED Pump Monitor on the same workbench as the OSM rig monitor, so the two demos read
+	// as one product.
 	//
 	// One dialog. RED's observability was a full-screen panel behind a menubar icon and
 	// its playback a full-width bar; both are sections of Settings now, and Settings is

@@ -8,11 +8,9 @@ back to the sensor traces, the verdict, a timeline and an embedding space.
 > The app holds one **serving agent** while it runs, and deletes it when you
 > stop it.
 
-It is the same app as the [full example's
-`app-serving/`](https://github.com/archetypeai/rare-event-detection-agent-example/tree/main/app-serving),
-with two differences: it serves this repo's promoted blueprint, and it replays the
-**delivery** files (breakdowns #4 and #7, `data/roles/delivery/`), since this repo
-ships no raw file. The agent gets each file's z-scored values as written, so every
+It serves this repo's promoted blueprint, and it replays the **delivery** files
+(breakdowns #4 and #7, `data/roles/delivery/`), since this repo ships no raw
+file. The agent gets each file's z-scored values as written, so every
 served window can be checked against Stage 6's batch output; the charts show them
 back in engineering units, through `data/prepared/pump_zscore_stats.json`.
 
@@ -179,8 +177,6 @@ path's agents (see the [repo README](../README.md)), whenever you're done with t
 | MQTT TCP | MQTT WS | Web | Agent admin |
 |---|---|---|---|
 | 1891 | 9009 | 5181 | 9101 (the serving bridge) |
-
-The same slot as the full example's `app-serving/`, so run one of the two at a time.
 
 ## Layout
 

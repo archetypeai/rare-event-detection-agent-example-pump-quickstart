@@ -80,7 +80,7 @@ def adapt_raw_summary(summary):
        counted as a sensor and — with a 2.2e5 range — becomes the column the
        feature-scale check complains about. Prep drops it.
     2. `timestamp` holds ISO-8601 strings, but the check does `float(...)` and
-       marks the file non-monotonic when that raises. The design doc accepts
+       marks the file non-monotonic when that raises. The design accepts
        ISO-8601 *and* Unix, so this is a limitation of the vendored tool, not a
        defect in the data. We recompute ordering by parsing the ISO values so
        the reported answer is the true one; prep emits Unix seconds.

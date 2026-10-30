@@ -4,7 +4,7 @@
 	import { CLASSES, CLASS_META } from '$lib/red.js';
 	import { hover } from '$lib/stores/hover.svelte.js';
 
-	// Ported from osm-rig-monitor's embedding-space.svelte so both workbenches read as
+	// The same embedding space as Archetype AI's OSM rig monitor, so both workbenches read as
 	// one product. The construction is theirs verbatim — density contours per class,
 	// pills on the cores, a fading trail of live windows. What differs is RED's data:
 	// two classes instead of six.

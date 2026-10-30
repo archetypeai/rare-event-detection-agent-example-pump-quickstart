@@ -25,9 +25,9 @@ TERMINAL = {"completed", "failed", "canceled", "cancelled"}
 
 # The `red` blueprint defaults to window 1024 and step 256: at 1024, incident #1
 # yields no shots and 2 of 7 incidents can't reach a fault majority, so every
-# request pins the window and step. Window 64, step 1 is the archived winner.
+# request pins the window and step. Window 64, step 1 is the winner of a wider window search.
 SEARCH = {"window_size": "64", "step_size": "1", "metric": "cosine,l1,l2,dot", "trials": 4}
-# The archived grid ranked by fault F1: with one event class, foreground macro-F1.
+# Trials are ranked by fault F1: with one event class, foreground macro-F1.
 PRIMARY = "event.foreground_macro_f1"
 
 
@@ -92,7 +92,7 @@ def constant(cls: str) -> dict:
 # The platform scores each record once: a window answers only for the rows since
 # the previous window ended, collapsed by `downsampling`. At step 1 that is one
 # row, so majority_vote equals the default last_record; it matters at a coarser
-# step. fit/test.py also scores whole-window majorities, as the design doc does.
+# step. fit/test.py also scores whole-window majorities, as the design rule does.
 COLUMN = {"from": {"column": "label"}, "downsampling": "majority_vote"}
 
 

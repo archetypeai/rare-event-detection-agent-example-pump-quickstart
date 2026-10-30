@@ -2,8 +2,8 @@
 """Stage 7 — score downloaded platform outputs against the ground-truth sidecars.
 
 Offline and stdlib-only: no API key, no network, no platform calls. Point it at
-output CSVs you already have (from `run_red_example.py`, `run_red_eval.py`, or a
-raw `curl` run you downloaded yourself) and it scores them.
+output CSVs you already have (from `fit/deliver.py`, or a run you downloaded
+yourself) and it scores them.
 
 Separating this from Stage 6 matters in practice: a run can finish while nothing
 is polling it, and re-scoring is something you do repeatedly while a single run
@@ -12,7 +12,7 @@ is something you do once. This script never re-runs anything.
 Each slice is scored three ways, because window-level averages alone mislead
 when the positive class is this rare:
 
-  window level     precision / recall / F1 per class under the design doc's
+  window level     precision / recall / F1 per class under the design rule's
                    majority rule (a window's truth is the label holding the
                    majority of its rows; ties go to the rare event).
   incident level   detected or missed, and the latency after onset. A slice can
@@ -23,17 +23,17 @@ when the positive class is this rare:
 Usage:
   # all four held-out slices — list the outputs after one flag
   python3 fit/evaluate_events.py --window-size 64 \\
-      --platform-output eval_out_step1/red-output-inc04.csv \\
-                        eval_out_step1/red-output-inc05.csv \\
-                        eval_out_step1/red-output-inc06.csv \\
-                        eval_out_step1/red-output-inc07.csv
+      --platform-output eval_out/delivery/red-output-inc04.csv \\
+                        eval_out/delivery/red-output-inc05.csv \\
+                        eval_out/delivery/red-output-inc06.csv \\
+                        eval_out/delivery/red-output-inc07.csv
 
   # one slice
   python3 fit/evaluate_events.py --window-size 64 \\
-      --platform-output eval_out_step1/red-output-inc04.csv
+      --platform-output eval_out/delivery/red-output-inc04.csv
 
   # shell glob, or explicit names if your filenames differ
-  python3 fit/evaluate_events.py --window-size 64 --platform-output eval_out_step1/*.csv
+  python3 fit/evaluate_events.py --window-size 64 --platform-output eval_out/delivery/*.csv
   python3 fit/evaluate_events.py --window-size 64 --slices inc04,inc05 \\
       --platform-output a.csv b.csv
 """
