@@ -1,6 +1,5 @@
 {
- "blueprint": "red-pump-otr_3ettyhtcr89s7rrwt6b8qqam8f",
- "served_blueprint": "red-pump-otr_3ettyhtcr89s7rrwt6b8qqam8f-served-records",
+ "blueprint": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
  "files": [
   {
    "file": "inc04",
@@ -47,9 +46,9 @@
  "max_p_diff": 0.0,
  "invalid": 0,
  "latency_ms": {
-  "median": 478,
-  "p95": 755,
-  "max": 1966
+  "median": 436,
+  "p95": 724,
+  "max": 8701
  },
- "replay_seconds": 598.0
+ "replay_seconds": 591.5
 }

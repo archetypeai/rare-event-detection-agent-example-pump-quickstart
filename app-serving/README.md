@@ -5,11 +5,8 @@ as if the pump were running now, and every window goes to a **serving agent** of
 the classifier Stage 5 promoted, on the Archetype AI platform. The answers come
 back to the sensor traces, the verdict, a timeline and an embedding space.
 
-> **Dev and Staging only.** Agent serving is on Dev
-> (`https://platform.dev.u1.archetypeai.app`) and Staging
-> (`https://platform.stage.u1.archetypeai.app`) for first internal tests. Dev has
-> **3 serving workers for everyone**: this app holds one while it runs, and gives
-> it back when you stop it.
+> The app holds one **serving agent** while it runs, and deletes it when you
+> stop it.
 
 It is the same app as the [full example's
 `app-serving/`](https://github.com/archetypeai/rare-event-detection-agent-example/tree/main/app-serving),
@@ -28,7 +25,7 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
 ┌───────────────────────────┐  GET /status    ┌──────────────────────────────┐          │
 │ replayer (node)           │  POST /reset    │ serving bridge (node)        │◀─────────┘
 │ one delivery file at a    │  POST /start    │ the API key stays here;      │   POST /query   ┌──────────────────────────┐
-│ time, data-time pace,     │────────────────▶│ keeps the last 64 rows,      │────────────────▶│ serving agent (Dev/Stg)  │
+│ time, data-time pace,     │────────────────▶│ keeps the last 64 rows,      │────────────────▶│ serving agent            │
 │ holds off while the agent │  admin :9101    │ one query per row (step 1)   │  the latest 64  │ promoted classifier,     │
 │ catches up                │                 │                              │  rows           │ atai-records,            │
 └───────────────────────────┘                 └──────────────────────────────┘◀────────────────│ embeddings on            │
@@ -80,7 +77,7 @@ and the Optimizations and Evals APIs return metrics and predictions, not
 embeddings. So the training windows are encoded again, on the platform:
 
 ```sh
-python3 fit/library_embeddings.py     # once, from the repo root: 3 batch runs, ~1-30 min with Dev's load
+python3 fit/library_embeddings.py     # once, from the repo root: 3 batch runs, a few minutes
 ```
 
 It runs the 3 training files (normal operation and breakdowns #1 and #2) through
@@ -95,7 +92,7 @@ the classifier fits one mean per class, but its own vectors can't be read.
 ## Run it
 
 Prerequisites: Node 20+, `brew install mosquitto`, `git lfs pull`, and Stages 4–6
-run on Dev or Staging (`fit/out/test_state.json` names the promoted blueprint). In the
+run (`fit/out/test_state.json` names the promoted blueprint). In the
 [repo README](../README.md) this is Stage 9. Then:
 
 ```sh
@@ -118,7 +115,7 @@ so every verdict is the one Stage 6 delivered.
 
 ## Stop and clean up
 
-A running app holds a serving agent, and so one serving worker (Dev has 3),
+A running app holds a serving agent, and so one serving worker,
 until the bridge deletes the agent or the platform releases it after 20 minutes
 without a query. Closing the browser tab does not stop it.
 

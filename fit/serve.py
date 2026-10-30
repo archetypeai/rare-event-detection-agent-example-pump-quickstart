@@ -27,7 +27,6 @@ the batch output for the same window:
      (Ctrl-C, SIGTERM and SIGHUP included). Their ids stay in
      fit/out/serve_state.json until then, so fit/cleanup.py finds them after a kill.
 
-Dev and Staging only, like serving (https://github.com/archetypeai/agent-serving-example).
 A served agent keeps no window between queries, so a query must carry the whole
 window. Writes eval_out/serving/.
 """
@@ -88,10 +87,6 @@ def main() -> int:
     args = ap.parse_args()
 
     load_dotenv()
-    # Match the deployment, not one host: dev is api.dev.* and platform.dev.*, staging platform.stage.*
-    if not any(d in agents_base() for d in (".dev.", ".stage.")):
-        sys.exit("agent serving is on dev and staging only for now "
-                 "(e.g. https://platform.dev.u1.archetypeai.app, https://platform.stage.u1.archetypeai.app)")
     bp = load_state(state_path("test")).get("blueprint") or sys.exit("no promoted blueprint: run fit/test.py")
     m = manifest()
     channels, window = m["channels"], bp["values"]["window_size"]

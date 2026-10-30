@@ -119,7 +119,7 @@
 		<text x="66" y="205" font-size="10" fill={MUTED}>epoch on discontinuity</text>
 		<!-- agent -->
 		{@render box(600, 130, 290, 110, 'Rare Event Detection Agent', agentAlive)}
-		<text x="626" y="172" font-size="10" fill={MUTED}>agent serving · Archetype AI platform (Dev)</text>
+		<text x="626" y="172" font-size="10" fill={MUTED}>agent serving · Archetype AI platform</text>
 		<text x="626" y="190" font-size="10" fill={MUTED}>window {WINDOW_SIZE} · step 1 → validate</text>
 		<text x="626" y="205" font-size="10" fill={MUTED}>Omega 1.5 → nearest prototype</text>
 		<text x="626" y="220" font-size="10" fill={MUTED}>2 classes · per-variate embeddings</text>
