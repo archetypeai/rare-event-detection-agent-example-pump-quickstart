@@ -394,7 +394,7 @@ served 1,162 windows of 2 file(s) in 1,162 queries, 591 s
 ### Stage 9 (optional): watch it live, served from the platform
 
 ```sh
-python3 fit/library_embeddings.py     # once: the embedding space, recomputed in batch (~1 min on Dev)
+python3 fit/library_embeddings.py     # once: the embedding space, recomputed in batch (a few minutes)
 cd app-serving && npm install && npm run dev
 open http://localhost:5181
 ```
@@ -410,10 +410,9 @@ answers come back. The API key stays in the bridge, never in the browser.
   [`fit/library_embeddings.py`](fit/library_embeddings.py) runs the 3 training
   files through the promoted blueprint in batch with `output_embeddings: true`, at
   step 4: 3,016 of the 12,059 training windows, and their PCA.
-- **Every verdict is Stage 6's.** On Dev (2026-10-16), breakdown #4's demo window,
-  1,023 windows, came back with every state and probability identical to
-  `eval_out/delivery/red-output-inc04.csv`, at 301 ms a query: the incident plays
-  in about 6 minutes.
+- **Every verdict is Stage 6's:** the bridge sends the same windows as Stage 8,
+  which came back identical to `eval_out/delivery/`. At under half a second a
+  query, breakdown #4's demo window (1,023 windows) plays in about 8 minutes.
 - **One serving agent while it runs.** `npm run stop` deletes the
   bridge's agent and bundle.
 

@@ -65,10 +65,11 @@ back in engineering units, through `data/prepared/pump_zscore_stats.json`.
   says so and keeps the ids for `fit/cleanup.py`. See
   [Stop and clean up](#stop-and-clean-up).
 
-**Checked on Dev, 2026-10-16:** breakdown #4's demo window (rows 784–1,869 of
-`inc04.csv`), 1,023 windows: every `predicted_state` and every probability
-identical to Stage 6's output for the same window, 0 invalid, each with its
-10 × 768 embeddings, 301 ms median per query.
+**Checked on production, 2026-10-29:** the app ran breakdown #4's demo window
+(rows 784–1,869 of `inc04.csv`, 1,023 windows) against a serving agent, each
+answer with its 10 × 768 embeddings. Stage 8 checked the same served windows
+against Stage 6's output: every `predicted_state` and probability identical,
+0 invalid.
 
 ## The embedding space: the training windows, recomputed
 
@@ -107,10 +108,10 @@ When you're done, stop it and check it cleaned up: [Stop and clean up](#stop-and
 
 ### Pace
 
-The platform answers a window in about a third of a second, so the replay runs at
-about 3 rows a second: the replayer holds off whenever the agent falls behind.
+The platform answers a window in under half a second, so the replay runs at
+about 2 rows a second: the replayer holds off whenever the agent falls behind.
 Breakdown #4's demo window (240 rows either side of the breakdown) takes about
-6 minutes, a whole delivery file about 13. Every window is asked about (step 1),
+8 minutes, a whole delivery file about 20. Every window is asked about (step 1),
 so every verdict is the one Stage 6 delivered.
 
 ## Stop and clean up
