@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Deliver: run the promoted blueprint as agents, then score offline.
+"""Deliver: run the promoted blueprint in batch sessions, then score offline.
 
     python3 fit/deliver.py                 # the four test slices, labels held back
     python3 fit/deliver.py --tail          # also the five tail chunks (2018-07-28 -> 08-31)
 
-One bundle on fit/test.py's promoted blueprint, which already holds the
-prototypes and every value the trial pinned. The bundle adds only `step_size: 1`,
-one prediction per row (bundle values override a promoted blueprint's). Inputs
+A package of fit/test.py's promoted blueprint, which already holds the prototypes
+and every value the trial pinned, step 1 included: one prediction per row. A
+package carries no values; it runs the blueprint as promoted. The package is
+deployed as `batch`, and a session runs over each delivery file. Inputs
 are data/roles/delivery/, which carry no label column; the labels stay in
 data/roles/labels/ until fit/evaluate_events.py reads them.
 
-Agent runs encode at ~2.2 windows/s: the slices are ~4.8 h of runs, the tail
+Sessions encode at ~2.2 windows/s: the slices are ~4.8 h of runs, the tail
 ~6.3 h. Every output is checked to cover its whole input (an output can be cut
 short at `completed`: red_api downloads it again until it reaches the input's
 end, and the window count is checked). Network errors are waited out.
 
 Writes eval_out/delivery/ (red-output-<file>.csv, evaluation-*.json) and
 fit/out/deliver_state.json (resume: a rerun skips finished files and polls
-agents already started).
+sessions already started).
 """
 from __future__ import annotations
 
@@ -31,8 +32,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, request, save_state, state_path
-from red_api import bundles_url, download_results, poll_agent, upload_file
+from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, save_state, state_path
+from red_api import create_package, deploy, download_results, open_session, poll_session, upload_file
 
 OUT = REPO / "eval_out" / "delivery"
 TIMEOUT_S = 4 * 3600
@@ -85,12 +86,16 @@ def main() -> int:
         with lock:
             save_state(STATE, state)
 
-    if "bundle" not in state:
-        b = request("POST", bundles_url(), body={
-            "blueprint": bp["key"], "name": "RED pump delivery, stride 1", "values": {"step_size": 1}})
-        state["bundle"] = b["id"]
+    if "bundle" in state:
+        raise SystemExit(f"{STATE} is from a bundle delivery: move it aside to deliver through a package")
+    if "package" not in state:
+        state["package"] = create_package(bp["id"], "RED pump delivery")["id"]
         save()
-        log(f"bundle {b['id']} ({b.get('status')}) on {bp['key']}")
+        log(f"package {state['package']} on {bp['key']} (step {bp['values']['step_size']})")
+    if "deployment" not in state:
+        state["deployment"] = deploy(state["package"], "batch")["id"]
+        save()
+        log(f"batch deployment {state['deployment']}")
 
     files = [f for f in m["delivery"] if "incident" in f or args.tail]
     OUT.mkdir(parents=True, exist_ok=True)
@@ -100,18 +105,17 @@ def main() -> int:
         dst = OUT / f"red-output-{src.stem}.csv"
         if dst.exists() and not complete(dst, src, window):
             return dst
-        runs = state.setdefault("agents", {})
+        runs = state.setdefault("sessions", {})
         if src.stem not in runs:
             stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             fid = upload_file(str(src), rename=f"red-pump-delivery__{src.stem}-{stamp}.csv")["file_id"]
-            agent = request("POST", f"{bundles_url(state['bundle'])}/run", body={
-                "connectors": {"source": [{"type": "file", "id": fid, "format": "csv"}]}})
+            ses = open_session(state["deployment"], [fid])
             with lock:
-                runs[src.stem] = agent["id"]
+                runs[src.stem] = ses["id"]
             save()
-            log(f"{src.name}: agent {agent['id']}")
-        if poll_agent(runs[src.stem], TIMEOUT_S, interval_s=60) != "completed":
-            log(f"{src.name}: agent did not report completed; trying /results anyway")
+            log(f"{src.name}: session {ses['id']}")
+        if poll_session(runs[src.stem], TIMEOUT_S, interval_s=60) != "completed":
+            log(f"{src.name}: session did not report completed; trying /results anyway")
         # red_api waits until the output's last window reaches the input's end;
         # the full count also catches windows missing in the middle.
         if download_results(runs[src.stem], str(dst), input_csv=str(src)):

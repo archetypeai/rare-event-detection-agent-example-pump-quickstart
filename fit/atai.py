@@ -31,6 +31,45 @@ SEARCH = {"window_size": "64", "step_size": "1", "metric": "cosine,l1,l2,dot", "
 PRIMARY = "event.foreground_macro_f1"
 
 
+PROJECT = "RED pump quickstart"
+BASE_KEY = "red-pump"            # promoted trials default to <BASE_KEY>-<trial id>, the key fit/test.py chooses
+
+
+def base_blueprint() -> dict:
+    """The quickstart's project and its copy of the canonical `red` blueprint.
+
+    Everything after it lives in the project: an optimization lands in its
+    blueprint's project, and so do the blueprints it promotes, their packages,
+    deployments and sessions. A deployment needs one, and the canonical `red` is
+    outside any, while POST /optimizations takes no project_id. Copying needs no
+    admin role. An existing project of that name, and an existing copy under
+    BASE_KEY in it, are reused.
+
+    Writes fit/out/project_state.json; returns {project, id, key}.
+    """
+    path = state_path("project")
+    state = load_state(path)
+    if "project" not in state:
+        found = [p for p in request("GET", f"{api_base()}/projects?limit=1000")["data"] if p["name"] == PROJECT]
+        state["project"] = found[0]["id"] if found else request(
+            "POST", f"{api_base()}/projects", body={
+                "name": PROJECT, "description": "Pump breakdowns, Rare Event Detection quickstart"})["id"]
+        save_state(path, state)
+        log(f"project {state['project']} ({PROJECT})")
+    if "base" not in state:
+        found = request("GET", f"{agents_base()}/blueprints?project_id={state['project']}&key={BASE_KEY}")["data"]
+        if found:
+            bp = found[0]
+            log(f"reusing {BASE_KEY} in {state['project']} ({bp['id']})")
+        else:
+            bp = request("POST", f"{agents_base()}/blueprints/red/copy",
+                         body={"project_id": state["project"], "blueprint_key": BASE_KEY})
+            log(f"copied red into {state['project']} as {BASE_KEY} ({bp['id']})")
+        state["base"] = {"id": bp["id"], "key": bp["blueprint_key"]}
+        save_state(path, state)
+    return {"project": state["project"], **state["base"]}
+
+
 def load_dotenv() -> None:
     """The repo's .env, wherever the script is run from."""
     red_api.load_dotenv(str(REPO / ".env"))

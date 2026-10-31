@@ -19,7 +19,12 @@ the points differ between runs; each optimization records the ones it drew. `met
 `window_size` and `step_size` share one encoder pass, so searching the metric is
 nearly free and each window or step adds a pass over every file.
 
-Writes fit/out/optimize_state.json (resume) and fit/out/optimize_<id>.json.
+Every trial searches the quickstart's own copy of `red`, in its project
+(fit/atai.py's base_blueprint), so what it promotes, and every package,
+deployment and session after it, lands in that project.
+
+Writes fit/out/optimize_state.json (resume), fit/out/optimize_<id>.json and
+fit/out/project_state.json.
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ import argparse
 import datetime
 import json
 
-from atai import (COLUMN, OUT, PRIMARY, ROLES, SEARCH, agents_base, aggregate, api_base, base_values,
+from atai import (COLUMN, OUT, PRIMARY, ROLES, SEARCH, agents_base, aggregate, api_base, base_blueprint, base_values,
                   constant, example, load_dotenv, load_state, log, manifest, request, save_state,
                   state_path, upload_all, wait)
 
@@ -78,7 +83,7 @@ def main() -> int:
         ids = upload_all([p for p, _ in train] + val)
         space, pinned = build_space(args)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        bp = request("GET", f"{agents_base()}/blueprints/red")
+        bp = base_blueprint()
         body = {"name": f"red-pump {stamp}", "blueprint_id": bp["id"], "primary": args.primary,
                 "overrides": {"values": {**base_values(m), **pinned}},
                 "search_space": {"parameters": space}, "budget": {"max_trials": args.trials},
