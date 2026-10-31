@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stage 9 prep: the embedding space for app-serving/, recomputed on the platform.
 
-    python3 fit/library_embeddings.py              # 3 batch runs, ~5-30 min with Dev's load
-    python3 fit/library_embeddings.py --step 1     # every training window (12,059; ~4x the time and download)
+    python3 fit/library_embeddings.py              # the embeddings blueprint, 3 batch sessions, the view
+    python3 fit/library_embeddings.py --step 1     # every training window in the view (12,059)
 
 app/ builds its Embedding Space by re-encoding the training shots with a local
 Omega checkpoint (fit/build_embedding_landscape.py). The platform path has no
@@ -11,10 +11,16 @@ artifact (`aar_...`) with no download route, and the Optimizations and Evals API
 return metrics and predictions, not embeddings. So the training windows are
 encoded again on the platform:
 
-  1. a bundle on fit/test.py's promoted blueprint with `output_embeddings: true`
-     and `step_size` 4 (a quarter of the 12,059 training windows: the same cloud
-     at a quarter of the download);
-  2. one agent per training file (normal, breakdowns #1 and #2), in parallel;
+  1. an embeddings blueprint: a package runs a blueprint exactly as promoted and
+     can't turn an output on, so a 1-trial optimization in the project at
+     fit/test.py's trial's point (window, step 1, metric), with
+     `output_embeddings: true` pinned, then promoted. The prototypes it refits are
+     the class means of the same windows, so it answers as Stage 5's blueprint;
+     app-serving/'s bridge serves it for the live point;
+  2. a package of it, one batch deployment, and one session per training file
+     (normal, breakdowns #1 and #2), in parallel. The step is the trial's, 1: every
+     --step-th window (4 by default, a quarter of the 12,059 training windows: the
+     same cloud) is kept, the same windows a step-4 run gives;
   3. the 10 x 768 embeddings of every window, in the manifest's channel order,
      and PCA 1-2 of them: the cloud, and the projection the app applies to each
      live window. The two class prototypes are the means of each class's
@@ -24,7 +30,8 @@ encoded again on the platform:
 Writes app-serving/static/red-embedding-landscape.json (the format app/ reads)
 and fit/out/library_embeddings/ (the outputs, regenerable). Ids go to
 fit/out/library_state.json, so a rerun resumes and fit/cleanup.py can delete
-the agents afterwards.
+the sessions, deployment and package afterwards (the embeddings blueprint stays,
+for a rerun and for the app).
 """
 from __future__ import annotations
 
@@ -39,22 +46,59 @@ from pathlib import Path
 
 import numpy as np
 
-from atai import OUT as FIT_OUT, REPO, ROLES, load_dotenv, load_state, log, manifest, request, save_state, state_path
-from red_api import bundles_url, download_results, poll_agent, upload_file
+from atai import (COLUMN, OUT as FIT_OUT, PRIMARY, REPO, ROLES, agents_base, constant, example, load_dotenv,
+                  load_state, log, manifest, request, save_state, state_path, upload_all, wait)
+from red_api import create_package, deploy, download_results, open_session, poll_session, upload_file
+from test import promote
 
 CLASSES = ["normal", "pump_breakdown"]
-CHECKPOINTING_OFF = {"checkpointing": {"trigger_after_input_byte_size": 0, "trigger_after_delay_ms": 0}}
 VIEW = REPO / "app-serving" / "static" / "red-embedding-landscape.json"
 DIR = FIT_OUT / "library_embeddings"
 
 
-def read_embeddings(path: Path, channels: list[str]) -> np.ndarray:
-    """[windows, channels x 768] from an output CSV (each embedding cell a JSON list)."""
+def embeddings_blueprint(m: dict, bp: dict, state: dict, save) -> dict:
+    """{id, key} of a blueprint at fit/test.py's trial's point with output_embeddings on: a
+    1-trial optimization in the project, then promoted. Resumable through `state`."""
+    if state.get("embeddings_blueprint"):
+        return state["embeddings_blueprint"]
+    if not state.get("embeddings_optimization"):
+        base = load_state(state_path("project"))["base"]
+        train = [(ROLES / f["file"], f["class"]) for f in m["training"]]
+        val = [ROLES / f["file"] for f in m["validation"]]
+        ids = upload_all([p for p, _ in train] + val)
+        values = {k: v for k, v in bp["values"].items() if k != "metric"}
+        o = request("POST", f"{agents_base()}/optimizations", body={
+            "name": f"red-pump embeddings {datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}",
+            "blueprint_id": base["id"], "primary": PRIMARY, "budget": {"max_trials": 1},
+            "overrides": {"values": {**values, "output_embeddings": True}},
+            # the search space can't be empty: the metric, with the trial's one value
+            "search_space": {"parameters": {"metric": {
+                "kind": "value", "spec": {"type": "categorical", "values": [bp["values"]["metric"]]}}}},
+            "training_examples": [example(p.stem, ids[p], constant(c)) for p, c in train],
+            "validation_examples": [example(p.stem, ids[p], COLUMN) for p in val]})
+        state.update(embeddings_optimization=o["id"], blueprint=bp["key"])
+        save()
+        log(f"optimization {o['id']}: 1 trial at {bp['trial']}'s point "
+            f"(w {values['window_size']}, step {values['step_size']}, {bp['values']['metric']}), embeddings on")
+    opt = wait("optimizations", state["embeddings_optimization"], every_s=30)
+    trials = request("GET", f"{agents_base()}/optimizations/{opt['id']}/trials?limit=10")["data"]
+    trial = next((t for t in trials if t["status"] == "completed"), None)
+    if opt["status"] != "completed" or not trial:
+        sys.exit(f"{opt['id']} is {opt['status']} with no completed trial: move fit/out/library_state.json aside to try again")
+    emb = promote(opt["id"], trial["id"], name=f"RED pump, embeddings on ({bp['key']}'s configuration)")
+    state["embeddings_blueprint"] = {"id": emb["id"], "key": emb["key"]}
+    save()
+    return state["embeddings_blueprint"]
+
+
+def read_embeddings(path: Path, channels: list[str], every: int = 1) -> np.ndarray:
+    """[windows, channels x 768] from an output CSV (each embedding cell a JSON list):
+    every `every`-th window, as a run at that step would give."""
     csv.field_size_limit(1 << 30)
     rows = []
     with open(path, newline="") as fh:
-        for r in csv.DictReader(fh):
-            if r.get("finish_timestamp") == "finish_timestamp" or str(r.get("invalid")).lower() == "true":
+        for i, r in enumerate(csv.DictReader(fh)):
+            if i % every or r.get("finish_timestamp") == "finish_timestamp" or str(r.get("invalid")).lower() == "true":
                 continue
             rows.append(np.concatenate([np.asarray(json.loads(r[f"embedding_{c}"]), dtype=np.float32)
                                         for c in channels]))
@@ -98,7 +142,7 @@ def landscape(by_class: dict[str, np.ndarray], window: int, step: int, n_fitted:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--step", type=int, default=4, help="stride over the training files (default 4)")
+    ap.add_argument("--step", type=int, default=4, help="keep every N-th training window in the view (default 4)")
     args = ap.parse_args()
     load_dotenv()
     m = manifest()
@@ -106,34 +150,41 @@ def main() -> int:
     channels, window = m["channels"], bp["values"]["window_size"]
     path = state_path("library")
     state = load_state(path)
-    if state.get("step", args.step) != args.step:
-        sys.exit(f"{path} is for step {state['step']}: move it and {DIR.relative_to(REPO)} aside")
-    state["step"] = args.step
-    if "bundle" not in state:
-        state["bundle"] = request("POST", bundles_url(), body={
-            "blueprint": bp["key"], "name": "RED library embeddings",
-            "values": {"step_size": args.step, "output_embeddings": True, "runner_config": CHECKPOINTING_OFF}})["id"]
-        save_state(path, state)
-        log(f"bundle {state['bundle']} on {bp['key']}, step {args.step}, embeddings on")
+    if state.get("bundle") or state.get("step"):
+        sys.exit(f"{path} is from a bundle run: move it and {DIR.relative_to(REPO)} aside")
+    if state.get("blueprint", bp["key"]) != bp["key"]:
+        sys.exit(f"{path} is for {state['blueprint']}, not {bp['key']}: move it and {DIR.relative_to(REPO)} aside")
+    lock = threading.Lock()                       # the three sessions save one state file
+
+    def save():
+        with lock:
+            save_state(path, state)
+    if "deployment" not in state:
+        emb = embeddings_blueprint(m, bp, state, save)
+        if "package" not in state:
+            state["package"] = create_package(emb["id"], "RED library embeddings")["id"]
+            save()
+        state["deployment"] = deploy(state["package"], "batch")["id"]
+        save()
+        log(f"package {state['package']} of {emb['key']} (step {bp['values']['step_size']}, embeddings on), "
+            f"batch deployment {state['deployment']}")
     DIR.mkdir(parents=True, exist_ok=True)
-    lock = threading.Lock()                       # the three runs save one state file
 
     def one(f: dict) -> Path | None:
         src, dst = ROLES / f["file"], DIR / Path(f["file"]).name
         if dst.exists():
             return dst
-        runs = state.setdefault("agents", {})
+        runs = state.setdefault("sessions", {})
         if f["file"] not in runs:
             stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             fid = upload_file(str(src), rename=f"red-pump-library__{src.stem}-{stamp}.csv")["file_id"]
-            agent = request("POST", f"{bundles_url(state['bundle'])}/run", body={
-                "connectors": {"source": [{"type": "file", "id": fid, "format": "csv"}]}})["id"]
+            ses = open_session(state["deployment"], [fid])["id"]
             with lock:
-                runs[f["file"]] = agent
-                save_state(path, state)
-            log(f"{src.name}: agent {runs[f['file']]}")
-        if poll_agent(runs[f["file"]], 4 * 3600, interval_s=60) != "completed":
-            log(f"{src.name}: agent did not report completed; trying /results anyway")
+                runs[f["file"]] = ses
+            save()
+            log(f"{src.name}: session {ses}")
+        if poll_session(runs[f["file"]], 4 * 3600, interval_s=60) != "completed":
+            log(f"{src.name}: session did not report completed; trying /results anyway")
         if download_results(runs[f["file"]], str(dst) + ".part", input_csv=str(src)):
             Path(str(dst) + ".part").rename(dst)
             log(f"{src.name}: complete")
@@ -149,7 +200,7 @@ def main() -> int:
     by_class: dict[str, list] = {c: [] for c in CLASSES}
     n_fitted = 0
     for f, out in zip(m["training"], got):
-        emb = read_embeddings(out, channels)
+        emb = read_embeddings(out, channels, args.step)
         by_class[f["class"]].append(emb)
         n_fitted += f["n_rows"] - window + 1
         log(f"{Path(f['file']).name}: {len(emb):,} windows of {f['n_rows'] - window + 1:,} -> {f['class']}")

@@ -23,14 +23,19 @@
  *   GET /status reports `Running` once the serving agent is, POST /reset drops
  *   the buffer and anything queued (a seek or incident switch), POST /start is
  *   a no-op, POST /shutdown cleans up and exits (scripts/stop.sh calls it).
- * - ONE SERVING WORKER, HELD WHILE THIS RUNS. On exit
- *   the agents are cancelled and deleted, and the bundle deleted; the ids sit in
- *   fit/out/app_serving_state.json until then, so `python3 fit/cleanup.py`
- *   finds them after a hard kill. An agent the platform released (20 minutes
- *   without a query, e.g. a paused replay) is deleted and replaced on the next
- *   window: a bundle that still has an agent can't be deleted (409). Starting
- *   one, at startup or as a replacement, retries while all the serving
+ * - ONE SERVING WORKER, HELD WHILE THIS RUNS. The blueprint is packaged, the
+ *   package deployed as `serving` (the agent placed on a worker and loaded), and
+ *   a session opened on the deployment; queries go to the session. On exit the
+ *   session is cancelled, the deployment stopped, and all three deleted; the ids
+ *   sit in fit/out/app_serving_state.json until then, so `python3 fit/cleanup.py`
+ *   finds them after a hard kill. A session that stops taking queries (cancelled
+ *   elsewhere, or its deployment ended) is replaced on the next window, with a
+ *   new deployment if the old one is gone. Starting retries while all the serving
  *   workers are taken (15 s, doubling to 2 min).
+ * - EMBEDDINGS NEED THEIR OWN BLUEPRINT. A package carries no values, so it can't
+ *   turn `output_embeddings` on: the bridge serves fit/library_embeddings.py's
+ *   embeddings blueprint (Stage 5's configuration with embeddings on) when it was
+ *   made from the current Stage 5 blueprint, else Stage 5's, without the point.
  *
  * Env (repo .env): ATAI_API_ENDPOINT, ATAI_API_KEY.
  * Env (app-serving/.env): MQTT_PORT, AGENT_PORT.
@@ -63,7 +68,7 @@ const MODEL = 'red-pump';
 const STATE = path.join(REPO, 'fit', 'out', 'app_serving_state.json');
 
 if (fs.existsSync(STATE)) {
-	console.error(`bridge: ${path.relative(REPO, STATE)} holds an earlier bridge's agent: run python3 fit/cleanup.py --yes`);
+	console.error(`bridge: ${path.relative(REPO, STATE)} holds an earlier bridge's deployment: run python3 fit/cleanup.py --yes`);
 	process.exit(1);
 }
 const test = readJson(path.join(REPO, 'fit', 'out', 'test_state.json'));
@@ -80,7 +85,19 @@ if (test.endpoint && deployment(test.endpoint) !== deployment(ENDPOINT)) {
 	);
 	process.exit(1);
 }
-const PROMOTED = test.blueprint.key;
+/** fit/library_embeddings.py's embeddings blueprint, if it was made from this Stage 5 blueprint here. */
+const library = readJson(path.join(REPO, 'fit', 'out', 'library_state.json'));
+const served =
+	library?.embeddings_blueprint &&
+	library.blueprint === test.blueprint.key &&
+	library.endpoint &&
+	deployment(library.endpoint) === deployment(ENDPOINT)
+		? library.embeddings_blueprint
+		: test.blueprint;
+if (served === test.blueprint)
+	console.warn('bridge: no embeddings blueprint for this Stage 5 blueprint (python3 fit/library_embeddings.py makes one): serving it without embeddings');
+const PROMOTED = served.key;
+const PROMOTED_ID = served.id;
 const WINDOW = test.blueprint.values.window_size;
 // The classifier's channel order: the role files', which the replayer publishes in.
 const CHANNELS = readJson(path.join(REPO, 'data', 'roles', 'manifest.json'))?.channels;
@@ -107,50 +124,80 @@ async function api(method, p, body) {
 	return text ? JSON.parse(text) : {};
 }
 
-/** `agents`: every agent of the bundle not yet deleted, the current one last. */
-const live = { bundle: null, agent: null, agents: [], running: false };
-const save = () => fs.writeFileSync(STATE, JSON.stringify(
-	{ endpoint: ENDPOINT, bundle: live.bundle, agent: live.agent, agents: live.agents }, null, 1));
+/** `sessions`: every session not yet deleted, the current one last. `agent` is the current
+ *  session, under the name the page and the replayer read. */
+const live = { package: null, deployment: null, agent: null, sessions: [], running: false };
+const save = () => fs.writeFileSync(STATE, JSON.stringify({ endpoint: ENDPOINT, package: live.package,
+	deployment: live.deployment, session: live.agent, sessions: live.sessions }, null, 1));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function startAgent() {
-	if (!live.bundle) {
-		// The promoted blueprint as it is, at step 1: the platform supplies the serving
-		// connectors when a bundle runs in serving mode, so no served copy is made.
-		live.bundle = (await api('POST', '/bundles', { blueprint: PROMOTED, name: 'RED app-serving',
-			values: { step_size: 1, output_embeddings: true } })).id;
-		save();
-	}
-	live.agent = (await api('POST', `/bundles/${live.bundle}/run`, { mode: 'serving' })).id;
-	live.agents.push(live.agent);
-	save();
+/** Poll `p` while its status is `waiting`; throw unless it then reaches `want`. */
+async function until(p, want, waiting) {
 	const t0 = Date.now();
 	for (;;) {
-		const s = (await api('GET', `/instances/${live.agent}`)).status;
-		if (s === 'running') break;
-		if (['failed', 'completed', 'cancelled', 'canceled'].includes(s) || Date.now() - t0 > 600_000)
-			throw new Error(`agent ${live.agent} is ${s}`);
+		const o = await api('GET', p);
+		if (o.status === want) return o;
+		if (o.status !== waiting || Date.now() - t0 > 600_000)
+			throw new Error(`${p} is ${o.status}${o.error ? `: ${o.error}` : ''}`);
 		await sleep(2000);
 	}
-	live.running = true;
-	console.log(`bridge: serving agent ${live.agent} running (bundle ${live.bundle}, ${PROMOTED})`);
 }
 
-/** Cancel and delete an agent; true once it is gone (404 counts). */
-async function dropAgent(id) {
-	await api('POST', `/instances/${id}/cancel`, {}).catch(() => {});   // a released agent is already stopped
-	try {
-		await api('DELETE', `/instances/${id}`);
-	} catch (e) {
-		if (e.status !== 404) {
-			console.error(`bridge: ${e.message}`);
-			return false;
-		}
+async function startAgent() {
+	if (!live.package) {
+		// The blueprint as it is (step 1, and embeddings on for the embeddings blueprint):
+		// the platform supplies the serving connectors for a serving deployment.
+		live.package = (await api('POST', '/packages', { blueprint_ids: [PROMOTED_ID],
+			target: { kind: 'platform' }, name: 'RED app-serving' })).id;
+		save();
+		await until(`/packages/${live.package}`, 'ready', 'building');
 	}
-	live.agents = live.agents.filter((a) => a !== id);
+	if (!live.deployment) {
+		live.deployment = (await api('POST', '/deployments', { package_id: live.package, kind: 'serving' })).id;
+		save();
+		await until(`/deployments/${live.deployment}`, 'ready', 'deploying');
+	}
+	live.agent = (await api('POST', '/sessions', { deployment_id: live.deployment })).id;
+	live.sessions.push(live.agent);
+	save();
+	await until(`/sessions/${live.agent}`, 'running', 'pending');
+	live.running = true;
+	console.log(`bridge: session ${live.agent} running (deployment ${live.deployment}, package ${live.package}, ${PROMOTED})`);
+}
+
+/** Delete `p`, after `prep` (cancel or stop) where that still applies; true once it is gone (404 counts). */
+async function drop(p, prep) {
+	if (prep) await api('POST', `${p}/${prep}`, {}).catch(() => {});   // already ended: nothing to do
+	try {
+		await api('DELETE', p);
+		return true;
+	} catch (e) {
+		if (e.status === 404) return true;
+		console.error(`bridge: ${e.message}`);
+		return false;
+	}
+}
+
+async function dropSession(id) {
+	if (!(await drop(`/sessions/${id}`, 'cancel'))) return false;
+	live.sessions = live.sessions.filter((s) => s !== id);
 	if (live.agent === id) live.agent = null;
 	save();
 	return true;
+}
+
+async function dropDeployment() {
+	if (!live.deployment) return true;
+	if (!(await drop(`/deployments/${live.deployment}`, 'stop'))) return false;
+	live.deployment = null;
+	save();
+	return true;
+}
+
+/** True when the current deployment is still up. */
+async function deploymentReady() {
+	if (!live.deployment) return false;
+	return (await api('GET', `/deployments/${live.deployment}`).catch(() => ({}))).status === 'ready';
 }
 
 let stopping = false;
@@ -160,35 +207,27 @@ async function shutdown(sig) {
 	console.log(`bridge: ${sig}, cleaning up`);
 	let left = 0;
 	try {
-		for (const id of [...live.agents]) if (!(await dropAgent(id))) left++;
-		if (live.bundle && !left) {
-			try {
-				await api('DELETE', `/bundles/${live.bundle}`);
-			} catch (e) {
-				if (e.status !== 404) {
-					console.error(`bridge: ${e.message}`);
-					left++;
-				}
-			}
-		}
+		for (const id of [...live.sessions]) if (!(await dropSession(id))) left++;
+		if (!left && !(await dropDeployment())) left++;
+		if (!left && live.package && !(await drop(`/packages/${live.package}`))) left++;
 		if (left) {
 			// Keep the ids for fit/cleanup.py rather than leaving them on the platform unrecorded.
 			console.error(`bridge: not everything was deleted; run python3 fit/cleanup.py --yes (ids in ${path.relative(REPO, STATE)})`);
 		} else {
 			fs.rmSync(STATE, { force: true });
-			console.log(`bridge: deleted its agent(s) and bundle ${live.bundle ?? '(none)'}`);
+			console.log(`bridge: deleted its session(s), deployment and package ${live.package ?? '(none)'}`);
 		}
 	} finally {
 		process.exit(left ? 1 : 0);
 	}
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
-// Anything unexpected still cleans up: an exit without it would hold a Dev worker.
+// Anything unexpected still cleans up: an exit without it would hold a serving worker.
 process.on('uncaughtException', (e) => { console.error('bridge:', e); shutdown('error'); });
 process.on('unhandledRejection', (e) => { console.error('bridge:', e); shutdown('error'); });
 
-/** Start an agent, retrying while Dev's serving workers are all taken: at
- *  startup, and to replace one the platform released. */
+/** Open a session (deploying first if needed), retrying while the serving workers are all
+ *  taken: at startup, and to replace one that stopped taking queries. */
 async function startWithRetry() {
 	live.running = false;
 	for (let wait = 15_000; !stopping; wait = Math.min(wait * 2, 120_000)) {
@@ -196,8 +235,9 @@ async function startWithRetry() {
 			await startAgent();
 			return;
 		} catch (e) {
-			console.error(`bridge: could not start a serving agent (${e.message}); retrying in ${wait / 1000} s`);
-			if (live.agent) await dropAgent(live.agent);
+			console.error(`bridge: could not start serving (${e.message}); retrying in ${wait / 1000} s`);
+			if (live.agent) await dropSession(live.agent);
+			if (live.deployment && !(await deploymentReady())) await dropDeployment();
 			await sleep(wait);
 		}
 	}
@@ -238,12 +278,14 @@ async function drain() {
 			let answer;
 			const t = Date.now();
 			try {
-				answer = await api('POST', `/instances/${live.agent}/query`, body);
+				answer = await api('POST', `/sessions/${live.agent}/query`, body);
 			} catch (e) {
 				if (e.status === 409) {
-					console.warn(`bridge: agent ${live.agent} no longer running; replacing it`);
+					// The session was cancelled elsewhere, or its deployment ended.
+					console.warn(`bridge: session ${live.agent} no longer taking queries; replacing it`);
 					live.running = false;
-					if (live.agent) await dropAgent(live.agent);
+					if (live.agent) await dropSession(live.agent);
+					if (!(await deploymentReady())) await dropDeployment();
 					await startWithRetry();
 					queue.unshift(job);
 					continue;
@@ -297,7 +339,7 @@ http.createServer((req, res) => {
 	if (req.method === 'GET' && req.url === '/status') {
 		const ms = [...latencies].sort((a, b) => a - b);
 		return reply(live.running ? 200 : 503, { state: live.running ? 'Running' : 'Starting', agent: live.agent,
-			bundle: live.bundle, blueprint: PROMOTED, queued: queue.length, medianLatencyMs: ms[Math.floor(ms.length / 2)] ?? null });
+			deployment: live.deployment, package: live.package, blueprint: PROMOTED, queued: queue.length, medianLatencyMs: ms[Math.floor(ms.length / 2)] ?? null });
 	}
 	if (req.method === 'POST' && req.url === '/reset') {
 		reset();
