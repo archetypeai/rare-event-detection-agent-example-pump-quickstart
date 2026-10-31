@@ -487,17 +487,20 @@ curl -s "${ATAI_API_ENDPOINT%/api}/api/agents/deployments?status=ready&limit=100
 
 ## Results
 
-| stage | measure | ours |
-|---|---|---|
-| 1–3 | prepared and role files | every role check passed |
-| 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 |
-| 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60) |
-| 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) |
-| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 436 ms a query |
-| 9 | the live monitor, breakdown #4's demo window (1,023 windows) | served from the platform, the same windows as Stage 8 |
+| stage | measure | ours (production, bundles) | packages and sessions (dev, 2026-10-31) |
+|---|---|---|---|
+| 1–3 | prepared and role files | every role check passed | (reused) |
+| 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same |
+| 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60) | the same, with the same confusion counts |
+| 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) | byte-identical outputs and evaluation |
+| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 436 ms a query | the same; 352 ms a query |
+| 9 | the live monitor, breakdown #4's demo window (1,023 windows) | served from the platform, the same windows as Stage 8 | the same, from the embeddings blueprint; the library view equal to within its rounding |
 
 `fit/out/`, `eval_out/` and the numbers above are our run on production
-(Stages 4–7 on 2026-10-28, 8–9 on 2026-10-29). Prep, Optimize and Evals are
+(Stages 4–7 on 2026-10-28, 8–9 on 2026-10-29). A run of Stages 4–9 through
+projects, packages, deployments and sessions (dev, 2026-10-31,
+[MIGRATION.md](MIGRATION.md)) gave the same numbers, with delivery outputs
+byte-identical to production's. Prep, Optimize and Evals are
 close to deterministic here: runs from scratch, with fresh uploads, a new
 optimization and a new promoted blueprint, gave byte-identical test predictions
 and delivery outputs, and only the platform ids differed. The one difference
