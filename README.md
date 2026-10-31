@@ -14,7 +14,7 @@
   - **Training:** normal operation from early April and the first two breakdowns.
   - **Validation and test:** breakdown #3 picks the settings; #4–#7 are the
     one-shot test.
-  - **Delivery:** breakdowns #4 and #7 again, run as agents with their labels held
+  - **Delivery:** breakdowns #4 and #7 again, run in batch sessions with their labels held
     back, the way an operator would run the agent.
 - **The lifecycle:**
 
@@ -25,14 +25,31 @@
 | 2–3 | build the files the platform receives, and check them | ~1 s |
 | 4 | **Optimize:** fit the prototypes, score 4 distance metrics on validation | 3 min |
 | 5 | **promote** the best to a blueprint, **test** it once with the Evals API | 4 min |
-| 6 | **deliver:** a bundle from that blueprint, run over the delivery files | 1 min |
+| 6 | **deliver:** package that blueprint, deploy it in batch, run a session over each delivery file | 1 min |
 | 7 | **score** the delivery against the held-back labels | seconds |
-| 8 | **serve** it a window per query over `/query` (agent serving), checked against Stage 6 | 10 min |
-| 9 | **watch it live** (optional): the pump monitor in `app-serving/`, its agent served from the platform | as long as you like |
+| 8 | **serve** it: a serving deployment, a session answering a window per query, checked against Stage 6 | 10 min |
+| 9 | **watch it live** (optional): the pump monitor in `app-serving/`, served from a serving session on the platform | as long as you like |
 
   About **10 minutes** end to end through Stage 7, 8 of them on the platform; serving (Stage 8) adds 10 minutes. Platform times
-  vary with load: we have seen the same agent runs go at ~4 windows a second
+  vary with load: we have seen the same batch runs go at ~4 windows a second
   and at ~50, which would make Stage 6 about 20 minutes.
+
+- **The platform lifecycle** (Agent Lifecycle 2.0): everything lives in one
+  **project**. The quickstart copies the canonical `red` blueprint into it,
+  optimizes the copy, promotes the best trial, tests it, then **packages** it
+  (models resolved once), **deploys** the package as `batch` or `serving`, and
+  runs **sessions** on the deployment: a batch session runs over input files, a
+  serving session answers `/query`. No step makes an admin-only call. Moving from
+  bundles and instances: [MIGRATION.md](MIGRATION.md).
+
+```mermaid
+flowchart LR
+  p["project"] --> c["copy of <code>red</code>"] --> o["optimization<br/>Stage 4"] --> b["promoted blueprint<br/>Stage 5, + eval"]
+  b --> k["package"]
+  k --> db["deployment: batch"] --> sb["a session per file<br/>Stage 6"]
+  k --> ds["deployment: serving"] --> ss["a session, <code>/query</code><br/>Stage 8"]
+  b -. "Stage 9: 1-trial optimization,<br/>embeddings on" .-> e["embeddings blueprint"] --> ek["package → batch sessions (library view)<br/>package → serving session (the app)"]
+```
 
 - **Skip the download:** Stage 1's prepared files and the role files are in the
   repo, in Git LFS. See [Shortcuts](#shortcuts-skip-the-download).
@@ -89,7 +106,7 @@ training, validation and test.
   can still fill half of: the classifier compares whole windows, so a breakdown
   shorter than half a window barely moves one.
 - **Delivery re-runs two test breakdowns.** Evals already scored them; delivery
-  runs the blueprint as an operator would, a bundle at one prediction per row, and
+  runs the blueprint as an operator would, one prediction per row, and
   scores what comes out. #4 and #7 are a long and a short breakdown the test
   caught; #6, the 42-minute one, is missed by every configuration tried.
 
@@ -213,14 +230,19 @@ every scored breakdown can fill half a window. **Expect:** 15 `PASS` lines, then
 python3 fit/optimize.py
 ```
 
-1. **Upload** the 3 training files and the validation file. Ids are cached in
+1. **Project:** create the project `RED pump quickstart` (or reuse yours of that
+   name) and copy the canonical `red` blueprint into it as `red-pump`
+   (`POST /api/projects`, `POST /api/agents/blueprints/red/copy`). An optimization
+   lands in its blueprint's project, and so does everything made from it; a
+   deployment needs one. **Writes:** `fit/out/project_state.json`.
+2. **Upload** the 3 training files and the validation file. Ids are cached in
    `fit/out/uploads.json`.
-2. **Optimize:** create an optimization on the `red` blueprint. Each training
+3. **Optimize:** create an optimization on that copy. Each training
    file is labelled by its class; the validation file is scored on its `label`
    column. The platform embeds every window with Omega 1.5, averages each class's
    embeddings into a prototype and reports the fault F1
    (`event.foreground_macro_f1`) on validation.
-3. **Search space:** window 64, one prediction per row (step 1), and the
+4. **Search space:** window 64, one prediction per row (step 1), and the
    classifier's only setting, the **distance metric**: `cosine`, `l1`, `l2` and
    `dot`. The four trials share one pass of the encoder.
 
@@ -288,16 +310,20 @@ eval evl_…  blueprint red-pump-otr_…  (window 64, step 1, dot; 0 abstained)
 python3 fit/deliver.py
 ```
 
-1. **Bundle:** create a bundle from Stage 5's blueprint, adding only
-   `step_size: 1`: one prediction per row.
-2. **Run** it over `data/roles/delivery/`, both files at once, uploaded without
-   labels.
-3. **Download** each output, again until it covers its input (a run can report
-   `completed` while its output is still being written).
+1. **Package** Stage 5's blueprint as it is (`POST /api/agents/packages`, target
+   `platform`): the encoder and the prototypes are resolved once. It runs at the
+   trial's own step 1, one prediction per row; a package carries no values.
+2. **Deploy** it as `batch` (`POST /api/agents/deployments`), ready at once.
+3. **Run** a session on it over each of `data/roles/delivery/`'s files
+   (`POST /api/agents/sessions`, the file as a source connector), both at once,
+   uploaded without labels.
+4. **Download** each output from `/api/agents/sessions/{id}/results`, again until it
+   covers its input (a session can report `completed` while its output is still
+   being written).
 
-**Expect:** `bundle bnd_… (ready) on red-pump-otr_…`, two `agent agt_…` lines,
-`inc04.csv: complete`, `inc07.csv: complete`, then Stage 7's scores. Each agent
-took about 45 seconds here. **Writes:** `eval_out/delivery/red-output-*.csv` and
+**Expect:** `package pkg_… on red-pump-otr_… (step 1)`, `batch deployment dpl_…`, two
+`session ses_…` lines, `inc04.csv: complete`, `inc07.csv: complete`, then Stage 7's
+scores. Each session took about a minute here. **Writes:** `eval_out/delivery/red-output-*.csv` and
 `fit/out/deliver_state.json`.
 
 ### Stage 7: score the delivery
@@ -331,7 +357,7 @@ POOLED over 2 slices (4,652 windows)
 ```
 
 - **Both breakdowns caught, at the same minute as the test** (+54 and +60): the
-  agent runs and the Evals run give the same answers on the same rows.
+  batch sessions and the Evals run give the same answers on the same rows.
 - **#7 is caught late and briefly:** 28 of its 77 breakdown windows, starting an
   hour in. A 76-minute breakdown fills a 64-minute window only near its end.
 - **#4's 45 false alarms are the test's 45**, all within 1,024 rows of the
@@ -349,24 +375,27 @@ python3 fit/serve.py --whole                  # every window of both files (~4,6
 python3 fit/serve.py --windows-per-query 16   # up to 16 windows per query
 ```
 
-Stage 6 delivers in batch: upload a file, run an agent, read the output when the
-run is done. **Agent serving** keeps an agent loaded and answers a window in one
+Stage 6 delivers in batch: upload a file, run a session, read the output when the
+session is done. **Agent serving** keeps an agent loaded and answers a window in one
 round trip, as the pump's historian would ask it every minute for the latest 64
 readings.
 
-1. **Serving bundle:** a bundle of Stage 5's promoted blueprint itself, with
-   values `{step_size: 1}`. Run in serving mode, the platform supplies the serving
-   connectors in place of the blueprint's CSV source and sink, so no copy of the
-   blueprint is made.
-2. **Serving agent:** that bundle, run with `{"mode": "serving"}`.
+1. **Package:** Stage 5's promoted blueprint as it is. Deployed for serving, the
+   platform supplies the serving connectors in place of the blueprint's CSV source
+   and sink, so no copy of the blueprint is made.
+2. **A serving deployment and a session on it:** `POST /api/agents/deployments` with
+   `kind: "serving"` places the agent on a worker and loads it (seconds);
+   `POST /api/agents/sessions` opens a session on it, which answers over
+   `POST /api/agents/sessions/{id}/query` once it is `running`. The deployment
+   holds the agent; a session is a client's handle on it.
 3. **Replay:** every window ending within 2 hours of each breakdown (`--context
    120` rows), one query each, holding the latest 64 rows of the 10 channels. The
    agent keeps nothing between queries, so a query carries the whole window.
 4. **Check:** every answer against Stage 6's output for the same window:
    `predicted_state`, `p_normal` and `p_pump_breakdown`, and the detection and
    false alarms, counted as Stage 7 counts them.
-5. **Clean up:** the agent cancelled and deleted, and the bundle deleted, however
-   the replay ends; the ids stay in `fit/out/serve_state.json` until then.
+5. **Clean up:** the session cancelled, the deployment stopped, and the session,
+   deployment and package deleted, however the replay ends; the ids stay in `fit/out/serve_state.json` until then.
 
 **Expect** (ours, production, 2026-10-29, from a laptop on a train's wifi: the
 latency includes it):
@@ -405,16 +434,26 @@ sends Stage 8's served classifier the latest 64 rows for every row. The sensor
 traces, the verdict, the alarm, a timeline and an embedding space update as the
 answers come back. The API key stays in the bridge, never in the browser.
 
+- **An embeddings blueprint.** The live point and the embedding space need each
+  window's embeddings, which an agent returns only when its blueprint has
+  `output_embeddings: true`, and Stage 5's has it off. A bundle could switch it on
+  per run; a package has no values, so
+  [`fit/library_embeddings.py`](fit/library_embeddings.py) first makes a blueprint
+  with it on: a 1-trial optimization in the project at Stage 5's trial's point,
+  then promoted. Its prototypes are the class means of the same windows, so it
+  answers as Stage 5's blueprint. Run it once after each Stage 5.
 - **The embedding space is recomputed on the platform.** The promoted classifier
-  can't be downloaded and no API returns embeddings, so
-  [`fit/library_embeddings.py`](fit/library_embeddings.py) runs the 3 training
-  files through the promoted blueprint in batch with `output_embeddings: true`, at
-  step 4: 3,016 of the 12,059 training windows, and their PCA.
+  can't be downloaded and no API returns embeddings, so `fit/library_embeddings.py`
+  runs the 3 training files through the embeddings blueprint in batch (a package,
+  one batch deployment, a session per file) at the trial's step 1, and keeps every
+  4th window: 3,016 of the 12,059 training windows, the ones a step-4 run gives,
+  and their PCA.
 - **Every verdict is Stage 6's:** the bridge sends the same windows as Stage 8,
   which came back identical to `eval_out/delivery/`. At under half a second a
   query, breakdown #4's demo window (1,023 windows) plays in about 8 minutes.
-- **One serving agent while it runs.** `npm run stop` deletes the
-  bridge's agent and bundle.
+- **One serving deployment while it runs,** of the embeddings blueprint (or Stage
+  5's, without the live point, if there is none for the current Stage 5 blueprint).
+  `npm run stop` deletes the bridge's session, deployment and package.
 
 ### Clean up the platform
 
@@ -423,26 +462,27 @@ python3 fit/cleanup.py           # what would be deleted, and what stays
 python3 fit/cleanup.py --yes     # delete it
 ```
 
-It deletes, from the ids in `fit/out/`, Stage 6's 2 delivery agents and their
-bundle (their outputs are in `eval_out/delivery/`), Stage 9's 3 library agents and
-their bundle (the view is in `app-serving/static/`), and a serving agent and its
-bundle if `fit/serve.py` or `app-serving/` was killed before its own cleanup
-(`kill -9`, a closed laptop): a running serving agent holds a serving worker
-until it is cancelled or idle for 20 minutes. Agents go before their bundle (a
-bundle that still has one answers 409); an id already gone counts as done.
+It deletes the sessions, deployments and packages left on the platform, starting
+from the packages the stages recorded in `fit/out/`: Stage 6's delivery (its
+outputs are in `eval_out/delivery/`), Stage 9's library embeddings (the view is in
+`app-serving/static/`), and Stage 8's or the app's if `fit/serve.py` or
+`app-serving/` was killed before its own cleanup (`kill -9`, a closed laptop): a
+serving deployment holds a serving worker until it is stopped. For each package it
+lists the deployments and their sessions, so ones a stage never recorded are found
+too. Sessions go first, then deployments, then packages: each holds the next; an id
+already gone counts as done.
 
-**What stays:** the promoted blueprint, and the optimization and eval this README
-cites. After a cleanup, rerunning `fit/deliver.py` needs `fit/out/deliver_state.json`
-moved aside: its bundle is gone.
+**What stays:** the project, its copy of `red`, the promoted blueprints (Stage 5's
+and the embeddings one), and the optimization and eval this README cites. After a
+cleanup, rerunning `fit/deliver.py` needs `fit/out/deliver_state.json` moved aside:
+its package is gone.
 
-To see which of your serving agents are running, filter by status on the
-server and by mode client-side
-(`mode=serving` is ignored by the server):
+To see whether any serving deployment of yours is still up, holding a worker:
 
 ```sh
 set -a; source .env; set +a
-curl -s "$ATAI_API_ENDPOINT/agents/instances?status=running&limit=100" -H "Authorization: Bearer $ATAI_API_KEY" \
-  | jq -c '.data[] | select(.mode=="serving") | {id, blueprint, name, created_at}'
+curl -s "${ATAI_API_ENDPOINT%/api}/api/agents/deployments?status=ready&limit=100" -H "Authorization: Bearer $ATAI_API_KEY" \
+  | jq -c '.data[] | select(.kind=="serving") | {id, package_id, project_id, created_at}'
 ```
 
 ## Results
@@ -479,10 +519,11 @@ at which stage.
 | `fit/test.py` | Stage 5 |
 | `fit/deliver.py` | Stage 6, then Stage 7's scoring |
 | `fit/evaluate_events.py` | Stage 7 |
-| `fit/serve.py` | Stage 8: a serving bundle of the promoted blueprint, a serving agent, a query per window, every answer checked against Stage 6 |
+| `fit/serve.py` | Stage 8: a package of the promoted blueprint, a serving deployment and session, a query per window, every answer checked against Stage 6 |
 | `fit/library_embeddings.py` | Stage 9: the training windows' embeddings, recomputed in batch, and their PCA for `app-serving/` |
 | `app-serving/` | Stage 9: the live pump monitor, its agent served from the platform ([`app-serving/README.md`](app-serving/README.md)) |
-| `fit/cleanup.py` | the agents and bundles of Stages 6, 8 and 9, from the ids in `fit/out/`; dry run unless `--yes` |
+| `fit/cleanup.py` | the sessions, deployments and packages of Stages 6, 8 and 9, from the packages in `fit/out/`; dry run unless `--yes` |
+| `MIGRATION.md` | moving from bundles and instances to projects, packages, deployments and sessions |
 | `data/prepared/` | Stage 1's output: training files, slices and label sidecars, z-score stats, `prep_report.json` (Git LFS) |
 | `data/roles/` | Stage 2's output: the role files and labels Stages 3–7 read (Git LFS) |
 | `fit/out/`, `eval_out/delivery/`, `eval_out/serving/` | this repo's run: state and results |
