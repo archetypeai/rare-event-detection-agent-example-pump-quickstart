@@ -29,3 +29,6 @@ __pycache__/
 
 # Working notes, not part of the example
 plan.md
+
+# Test files cut into pieces on the free trial (fit/test.py --max-windows)
+fit/out/test-pieces/

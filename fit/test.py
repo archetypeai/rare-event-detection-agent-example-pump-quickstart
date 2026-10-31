@@ -4,6 +4,7 @@
     python3 fit/test.py                  # best trial across fit/optimize.py's runs, on incidents #4-#7
     python3 fit/test.py --optimization opt_...   # the best trial of one optimization
     python3 fit/test.py --trial otr_...  # a specific trial of the best run
+    python3 fit/test.py --max-windows 9000   # an eval per file, cut to <= 9,000 windows (the free trial's default)
 
 The promoted blueprint carries the classifier Optimize fitted on the training
 files and pins the trial's values. One eval scores it on the test role
@@ -25,6 +26,15 @@ example) and:
   * scores each incident: detected or missed, the delay after onset, and false
     alarms on windows with no fault row.
 
+On the free trial an eval is stopped after 2 hours and runs on CPU, at about
+9,000 windows of this pump's 10 channels in 1.5 hours, so there (ATAI_API_ENDPOINT
+on try.archetypeai.app) the default is `--max-windows 9000`: an eval per test file,
+a longer file cut into pieces of at most that many windows (fit/out/test-pieces/),
+`--parallel` at a time, pooled. Consecutive pieces overlap by a window less one
+row, so every window of the file is scored exactly once; each eval's confusion
+matrix is checked against its report, and the metrics are recomputed from the
+pooled counts the way the platform computes them.
+
 Writes fit/out/test_state.json (resume), fit/out/test.json and
 fit/out/test-predictions.ndjson.
 """
@@ -33,10 +43,12 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-from atai import (COLUMN, OUT, ROLES, agents_base, aggregate, api_base, example, load_dotenv,
+from atai import (COLUMN, OUT, ROLES, agents_base, aggregate, api_base, example, free_trial, load_dotenv,
                   load_state, log, manifest, request, save_state, state_path, upload_all, wait)
 
 FAULT = "pump_breakdown"
@@ -86,15 +98,52 @@ def promote(opt_id: str, trial_id: str | None) -> dict:
     return {"id": bp["id"], "key": bp["blueprint_key"], "trial": tid, "values": vals}
 
 
-def score(files: list, ev: dict, preds: list, window: int, step: int) -> dict:
+def split(files: list, max_windows: int, window: int, step: int) -> list:
+    """Each test file as one piece, or cut into pieces of at most `max_windows` windows.
+
+    Piece j holds the rows of its windows, so consecutive pieces overlap by window -
+    step rows and together hold exactly the file's windows. Pieces are written to
+    fit/out/test-pieces/ and keep `rows` (the source rows they span) and `of` (the file)."""
+    out = []
+    for f in files:
+        src = ROLES / f["file"]
+        lines = src.read_text().splitlines(True)
+        n = (len(lines) - 1 - window) // step + 1
+        k = -(-n // max_windows)
+        if k == 1:
+            out.append({**f, "of": src.stem})
+            continue
+        (OUT / "test-pieces").mkdir(parents=True, exist_ok=True)
+        cuts = [round(j * n / k) for j in range(k + 1)]          # window indices
+        for j, (a, b) in enumerate(zip(cuts, cuts[1:]), 1):
+            lo, hi = a * step, (b - 1) * step + window            # rows [lo, hi) of the file
+            piece = OUT / "test-pieces" / f"{src.stem}_part{j}of{k}.csv"
+            if not piece.exists():
+                piece.write_text(lines[0] + "".join(lines[1 + lo:1 + hi]))
+            out.append({**f, "file": piece, "rows": [f["rows"][0] + lo, f["rows"][0] + hi], "of": src.stem})
+    return out
+
+
+def metrics(c: dict) -> dict:
+    """The platform's aggregate from counts (each row once; checked against every eval's report)."""
+    f1 = lambda p, r: 2 * p * r / (p + r) if p + r else 0.0  # noqa: E731
+    pf, rf = c["tp"] / max(c["tp"] + c["fp"], 1), c["tp"] / max(c["tp"] + c["fn"], 1)
+    pn, rn = c["tn"] / max(c["tn"] + c["fn"], 1), c["tn"] / max(c["tn"] + c["fp"], 1)
+    return {"accuracy": (c["tp"] + c["tn"]) / max(sum(c.values()), 1), "detection_precision": pf,
+            "detection_recall": rf, "foreground_macro_f1": f1(pf, rf), "macro_f1": (f1(pf, rf) + f1(pn, rn)) / 2}
+
+
+def score(files: list, evals: list, preds: list, window: int, step: int) -> dict:
+    """Pair predictions with rows; check each eval's confusion and metrics; pool them, and
+    each file's pieces into one incident."""
     by_ex = {}
     for p in preds:
         by_ex.setdefault(p["example"], []).append(p)
-    totals = {"tp": 0, "fn": 0, "fp": 0, "tn": 0}
-    window_majority = dict(totals)
-    out, abstained, ties = {}, 0, 0
+    window_majority = {"tp": 0, "fn": 0, "fp": 0, "tn": 0}
+    counts, out, abstained, ties = {}, {}, 0, 0
     for f in files:
         name = (ROLES / f["file"]).stem
+        totals = counts[name] = dict.fromkeys(window_majority, 0)
         lab = (pd.read_csv(ROLES / f["file"], usecols=["label"]).label == FAULT).to_numpy()
         starts = list(range(0, len(lab) - window + 1, step))
         # The prediction record carries no row_index, and its `input` is 0 on every
@@ -129,18 +178,31 @@ def score(files: list, ev: dict, preds: list, window: int, step: int) -> dict:
             if hit:
                 fired.append((s, s + window))
         hits = [w for w in fired if w[0] < end and onset < w[1]]
-        out[name] = {"incident_rows": end - onset, "detected": bool(hits),
-                     "delay_samples": (min(w[1] for w in hits) - 1 - onset) if hits else None,
-                     "false_alarms": false_alarms, "normal_windows": normal_windows}
-    a = aggregate(ev["metrics_report"])
-    idx = {n: i for i, n in enumerate(a["class_names"])}
-    cm, fi, ni = a["confusion_matrix"], idx[FAULT], idx["normal"]
-    platform = {"tp": cm[fi][fi], "fn": cm[fi][ni], "fp": cm[ni][fi], "tn": cm[ni][ni]}
-    if totals != platform:
-        raise SystemExit(f"offline confusion {totals} != platform {platform}")
+        delay = (min(w[1] for w in hits) - 1 - onset) if hits else None
+        i = out.setdefault(f.get("of", name), {"incident_rows": end - onset, "detected": False, "delay_samples": None,
+                                               "false_alarms": 0, "normal_windows": 0})
+        i["detected"] |= bool(hits)
+        if delay is not None and (i["delay_samples"] is None or delay < i["delay_samples"]):
+            i["delay_samples"] = delay
+        i["false_alarms"] += false_alarms
+        i["normal_windows"] += normal_windows
+    pooled = dict.fromkeys(window_majority, 0)
+    for ev, names in evals:
+        a = aggregate(ev["metrics_report"])
+        idx = {n: i for i, n in enumerate(a["class_names"])}
+        cm, fi, ni = a["confusion_matrix"], idx[FAULT], idx["normal"]
+        platform = {"tp": cm[fi][fi], "fn": cm[fi][ni], "fp": cm[ni][fi], "tn": cm[ni][ni]}
+        offline = {k: sum(counts[n][k] for n in names) for k in pooled}
+        if offline != platform:
+            raise SystemExit(f"{ev['id']}: offline confusion {offline} != platform {platform}")
+        ours = metrics(offline)
+        # the platform reports a precision of 0/0 (nothing predicted fault) as None
+        if any(a[k] is not None and abs(ours[k] - a[k]) > 1e-9 for k in ours):
+            raise SystemExit(f"{ev['id']}: metrics from its counts {ours} != the platform's {a}")
+        for k in pooled:
+            pooled[k] += offline[k]
     tp, fp, fn = (window_majority[k] for k in ("tp", "fp", "fn"))
-    return {"platform": {k: v for k, v in a.items() if k not in ("confusion_matrix", "class_names")},
-            "confusion": platform, "abstained": abstained,
+    return {"platform": metrics(pooled), "confusion": pooled, "abstained": abstained,
             "window_majority": {**window_majority, "fault_f1": 2 * tp / max(2 * tp + fp + fn, 1),
                                 "tie_windows": ties},
             "incidents": out}
@@ -148,7 +210,7 @@ def score(files: list, ev: dict, preds: list, window: int, step: int) -> dict:
 
 def report(r: dict) -> None:
     p, v = r["platform"], r["blueprint"]["values"]
-    print(f"\neval {r['eval']}  blueprint {r['blueprint']['key']}  "
+    print(f"\neval {', '.join(r['evals'])}  blueprint {r['blueprint']['key']}  "
           f"(window {v['window_size']}, step {v['step_size']}, {v['metric']}; "
           f"{r['abstained']} abstained)")
     print(f"  platform (each row once): fault F1 {p['foreground_macro_f1']:.4f}  macro-F1 {p['macro_f1']:.4f}  "
@@ -170,8 +232,15 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--optimization", help="default: the best of fit/out/optimize_state.json's runs")
     ap.add_argument("--trial", help="default: the optimization's best trial")
+    ap.add_argument("--max-windows", type=int,
+                    help="an eval per test file, cut to at most N windows (default: one eval of all; 9000 on the free trial)")
+    ap.add_argument("--parallel", type=int, default=3, help="evals at once with --max-windows (the free trial runs 3)")
     args = ap.parse_args()
     load_dotenv()
+    if args.max_windows is None and free_trial():
+        args.max_windows = 9000
+        log("free trial (try.archetypeai.app): each job stops after 2 hours, so the test runs as an eval per "
+            "file, cut to at most 9,000 windows, 3 at a time, pooled (--max-windows 0 for one eval)")
     m = manifest()
     STATE = state_path("test")
     state = load_state(STATE)
@@ -182,34 +251,57 @@ def main() -> int:
         state["blueprint"] = promote(opt_id, args.trial)
         save()
 
-    files = m["test"]
-    paths = [ROLES / f["file"] for f in files]
-    if "eval" not in state:
-        ids = upload_all(paths, jobs=4)
-        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        ev = request("POST", f"{agents_base()}/evals", body={
-            "blueprint_id": state["blueprint"]["id"], "emit_predictions": True,
-            "name": f"red-pump test incidents 4-7 {stamp}",
-            "examples": [example(p.stem, ids[p], COLUMN) for p in paths]})
-        state["eval"] = ev["id"]
-        save()
-        log(f"eval {ev['id']}: {len(paths)} test files")
-    ev = wait("evals", state["eval"])
-    if ev["status"] != "completed" or not ev.get("metrics_report"):
-        raise SystemExit(f"eval {state['eval']} ended {ev['status']}: {ev.get('error')}")
-    pred = next(x["id"] for x in ev["output_artifacts"]
-                if x.get("metadata", {}).get("kind") == "predictions")
-    raw = request("GET", f"{api_base()}/files/download/{pred}", raw=True)
-    (OUT / "test-predictions.ndjson").write_bytes(raw)
     v = state["blueprint"]["values"]
-    r = score(files, ev, [json.loads(x) for x in raw.decode().splitlines()],
-              v["window_size"], v["step_size"])
-    r = {"eval": state["eval"], "blueprint": state["blueprint"],
+    files = m["test"]
+    if args.max_windows:
+        files = split(files, args.max_windows, v["window_size"], v["step_size"])
+    paths = [ROLES / f["file"] for f in files]
+    groups = [[p] for p in paths] if args.max_windows else [paths]
+    if not args.max_windows and "eval" in state:            # this script's single-eval state, before --max-windows
+        state.setdefault("evals", [state["eval"]])
+    state.setdefault("evals", [])
+    if len(state["evals"]) not in (0, len(groups)):
+        raise SystemExit(f"{STATE} holds {len(state['evals'])} eval(s), not {len(groups)}: "
+                         f"rerun with the same --max-windows, or move it aside")
+    ids = upload_all(paths, jobs=4)
+
+    def one(i: int) -> dict:
+        if i >= len(state["evals"]) or not state["evals"][i]:
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            what = "incidents 4-7" if len(groups) == 1 else groups[i][0].stem
+            ev = request("POST", f"{agents_base()}/evals", body={
+                "blueprint_id": state["blueprint"]["id"], "emit_predictions": True,
+                "name": f"red-pump test {what} {stamp}",
+                "examples": [example(p.stem, ids[p], COLUMN) for p in groups[i]]})
+            with lock:
+                state["evals"] += [None] * (i + 1 - len(state["evals"]))
+                state["evals"][i] = ev["id"]
+                save()
+            log(f"eval {ev['id']}: {len(groups[i])} test file(s)")
+        ev = wait("evals", state["evals"][i])
+        if ev["status"] != "completed" or not ev.get("metrics_report"):
+            with lock:                                      # a rerun starts a new eval for it
+                state["evals"][i] = None
+                save()
+            raise SystemExit(f"eval {ev['id']} ended {ev['status']}: {ev.get('error')}; rerun to retry it")
+        return ev
+
+    lock = threading.Lock()
+    with ThreadPoolExecutor(args.parallel if len(groups) > 1 else 1) as pool:
+        evs = list(pool.map(one, range(len(groups))))
+    raw = b""
+    for ev in evs:
+        pred = next(x["id"] for x in ev["output_artifacts"]
+                    if x.get("metadata", {}).get("kind") == "predictions")
+        raw += request("GET", f"{api_base()}/files/download/{pred}", raw=True).rstrip(b"\n") + b"\n"
+    (OUT / "test-predictions.ndjson").write_bytes(raw)
+    r = score(files, [(ev, [p.stem for p in g]) for ev, g in zip(evs, groups)],
+              [json.loads(x) for x in raw.decode().splitlines() if x.strip()], v["window_size"], v["step_size"])
+    r = {"evals": state["evals"], "max_windows": args.max_windows, "blueprint": state["blueprint"],
          "optimization": state["optimization"], **r}
     (OUT / "test.json").write_text(json.dumps(r, indent=1))
     report(r)
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

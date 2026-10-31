@@ -76,7 +76,7 @@ and the Optimizations and Evals APIs return metrics and predictions, not
 embeddings. So the training windows are encoded again, on the platform:
 
 ```sh
-python3 fit/library_embeddings.py     # once, from the repo root: 3 batch runs, a few minutes
+python3 fit/library_embeddings.py     # once, from the repo root: 3 batch runs, a few minutes (~22 on the free trial)
 ```
 
 It runs the 3 training files (normal operation and breakdowns #1 and #2) through

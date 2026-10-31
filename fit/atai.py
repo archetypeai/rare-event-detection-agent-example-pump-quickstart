@@ -10,6 +10,7 @@ import hashlib
 import json
 import sys
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -38,6 +39,17 @@ def load_dotenv() -> None:
 
 def log(msg: str) -> None:
     print(f"{datetime.datetime.now():%H:%M:%S} {msg}", flush=True)
+
+
+FREE_TRIAL_HOST = "try.archetypeai.app"
+
+
+def free_trial() -> bool:
+    """True on the free trial: CPU only, 3 jobs at once, each stopped after 2 hours.
+
+    The free trial is its own deployment, so its endpoint's host says so; a free-trial
+    key works nowhere else. Its defaults keep every job under the 2 hours."""
+    return urllib.parse.urlparse(api_base()).hostname == FREE_TRIAL_HOST
 
 
 def manifest() -> dict:
@@ -69,7 +81,7 @@ def upload_all(paths: list, jobs: int = 4) -> dict:
             f"({sum(p.stat().st_size for p in todo) / 1e6:,.1f} MB)")
 
         def one(p: Path):
-            rel = str(p.relative_to(ROLES)).replace("/", "__")
+            rel = str(p.relative_to(ROLES if p.is_relative_to(ROLES) else OUT)).replace("/", "__")   # OUT: test pieces
             return key(p), upload_file(str(p), rename=f"red-pump-{rel.replace('.csv', '')}-{stamp}.csv")["file_id"]
 
         OUT.mkdir(parents=True, exist_ok=True)
