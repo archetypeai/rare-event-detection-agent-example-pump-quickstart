@@ -71,10 +71,17 @@ def promote(opt_id: str, trial_id: str | None) -> dict:
         bp = trial["promoted_blueprint"]
         log(f"{tid} already promoted -> {bp['blueprint_key']} ({bp['id']})")
         return {"id": bp["id"], "key": bp["blueprint_key"], "trial": tid, "values": vals}
-    bp = request("POST", f"{agents_base()}/optimizations/{opt_id}/trials/{tid}/promote", body={
-        "blueprint_key": f"red-pump-{tid}",
+    url = f"{agents_base()}/optimizations/{opt_id}/trials/{tid}/promote"
+    body = {
         "name": f"RED pump (w {vals['window_size']}, step {vals['step_size']}, {vals['metric']})",
-        "description": f"Promoted from {opt_id}; prototypes from normal rows 0-8,191 and incidents #1-#2."})
+        "description": f"Promoted from {opt_id}; prototypes from normal rows 0-8,191 and incidents #1-#2."}
+    try:
+        bp = request("POST", url, body={"blueprint_key": f"red-pump-{tid}", **body})
+    except SystemExit as e:
+        # choosing the key needs the admin role (a free-trial org has none): let the platform choose it
+        if "(403)" not in str(e) or "blueprint_key" not in str(e):
+            raise
+        bp = request("POST", url, body=body)
     log(f"promoted {tid} -> {bp['blueprint_key']} ({bp['id']})")
     return {"id": bp["id"], "key": bp["blueprint_key"], "trial": tid, "values": vals}
 
