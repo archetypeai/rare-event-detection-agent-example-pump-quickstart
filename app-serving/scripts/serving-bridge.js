@@ -150,7 +150,16 @@ async function startAgent() {
 		live.package = (await api('POST', '/packages', { blueprint_ids: [PROMOTED_ID],
 			target: { kind: 'platform' }, name: 'RED app-serving' })).id;
 		save();
-		await until(`/packages/${live.package}`, 'ready', 'building');
+		try {
+			await until(`/packages/${live.package}`, 'ready', 'building');
+		} catch (e) {
+			// A failed package never becomes ready: drop it so the retry builds a new one.
+			if (await drop(`/packages/${live.package}`)) {
+				live.package = null;
+				save();
+			}
+			throw e;
+		}
 	}
 	if (!live.deployment) {
 		live.deployment = (await api('POST', '/deployments', { package_id: live.package, kind: 'serving' })).id;

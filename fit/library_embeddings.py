@@ -48,7 +48,8 @@ import numpy as np
 
 from atai import (COLUMN, OUT as FIT_OUT, PRIMARY, REPO, ROLES, agents_base, constant, example, load_dotenv,
                   load_state, log, manifest, request, save_state, state_path, upload_all, wait)
-from red_api import create_package, deploy, download_results, open_session, poll_session, upload_file
+from red_api import (create_package, deploy, deployment_ready, download_results, open_session, package_ready,
+                     poll_session, upload_file)
 from test import promote
 
 CLASSES = ["normal", "pump_breakdown"]
@@ -164,8 +165,10 @@ def main() -> int:
         if "package" not in state:
             state["package"] = create_package(emb["id"], "RED library embeddings")["id"]
             save()
+        package_ready(state["package"])
         state["deployment"] = deploy(state["package"], "batch")["id"]
         save()
+        deployment_ready(state["deployment"])
         log(f"package {state['package']} of {emb['key']} (step {bp['values']['step_size']}, embeddings on), "
             f"batch deployment {state['deployment']}")
     DIR.mkdir(parents=True, exist_ok=True)

@@ -6,9 +6,10 @@ Stages 4–9 and the live monitor were run end to end on 2026-10-31. That run us
 org-admin key, but the scripts make no admin-only call (see 6 below); a run with a
 member key is still to be confirmed.
 
-`/api/agents/bundles` and `/api/agents/instances` are being retired: move to the calls
-below. To check that your deployment of the platform serves them, `GET
-{root}/api/agents/sessions?limit=1` should answer 200, not 404.
+`/api/agents/bundles` and `/api/agents/instances` are being removed: some deployments of
+the platform already answer 404 for them, and the rest keep them only until their next
+platform release. Move to the calls below. A deployment serves the new calls
+when `GET {root}/api/agents/sessions?limit=1` answers 200, not 404.
 
 ## Before and after
 
@@ -106,9 +107,9 @@ All paths are under `{root}/api/agents` unless shown otherwise.
 | `DELETE /bundles/{id}` | `POST /deployments/{id}/stop`, `DELETE /deployments/{id}`, then `DELETE /packages/{id}` |
 | `GET /instances?bundle_id=` | `GET /deployments?package_id=`, `GET /sessions?deployment_id=` |
 
-Statuses: package `building → ready | failed`; deployment `deploying → ready → stopping →
-stopped | failed`; session `pending → running → completed | failed | cancelled` (and
-`paused`).
+Statuses: package `building → ready | failed`; deployment `deploying → ready → stopping
+→ stopped | failed`; session `pending → running → completed | failed | cancelled` (and
+`paused`). A package's `latest_runs` lists its sessions (`ses_…` ids).
 
 ## What changed in practice
 
@@ -168,7 +169,7 @@ stopped | failed`; session `pending → running → completed | failed | cancell
 
 | File | Change |
 |---|---|
-| `red_api.py` | `create_package`, `deploy`, `open_session`, `wait_running`, `poll_session`, `end`, `list_ids`; results from sessions, their ref resolved against the root; the bundle and instance helpers removed |
+| `red_api.py` | `create_package` and `package_ready`, `deploy` and `deployment_ready`, `open_session`, `wait_running`, `poll_session`, `end`, `list_ids`; results from sessions, their ref resolved against the root; the bundle and instance helpers removed |
 | `fit/atai.py` | `base_blueprint()`: the project `RED pump quickstart` and its copy of `red` (`fit/out/project_state.json`) |
 | `fit/optimize.py` | optimize the project's copy |
 | `fit/test.py` | promote takes an optional name (for the embeddings blueprint) |

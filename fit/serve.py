@@ -42,7 +42,8 @@ import time
 import pandas as pd
 
 from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, request, save_state, state_path
-from red_api import create_package, deploy, end, lifecycle_url, open_session, wait_running
+from red_api import (create_package, deploy, deployment_ready, end, lifecycle_url, open_session, package_ready,
+                     wait_running)
 
 MODEL = "red-pump"               # the name a query gives in `model`
 FAULT = "pump_breakdown"
@@ -120,11 +121,14 @@ def main() -> int:
     served, latency = {}, []
     t_start = time.time()
     try:
-        for kind, make in (("package", lambda: create_package(bp["id"], "RED serve")),
-                           ("deployment", lambda: deploy(state["package"], "serving")),
-                           ("session", lambda: open_session(state["deployment"]))):
+        # each id is recorded before waiting on it, so fit/cleanup.py can delete what fails
+        for kind, make, ready in (("package", lambda: create_package(bp["id"], "RED serve"), package_ready),
+                                  ("deployment", lambda: deploy(state["package"], "serving"), deployment_ready),
+                                  ("session", lambda: open_session(state["deployment"]), None)):
             state[kind] = make()["id"]
             save_state(live, state)
+            if ready:
+                ready(state[kind])
         log(f"package {state['package']} · serving deployment {state['deployment']} · session {state['session']}")
         wait_running(state["session"])
         for name, X, _, _, first, n in plan:

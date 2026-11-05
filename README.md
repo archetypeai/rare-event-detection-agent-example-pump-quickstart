@@ -151,10 +151,13 @@ Then go to [Stage 4](#stage-4-optimize).
 
 ## The stages
 
-**To run again from scratch,** move `fit/out/` and `eval_out/` aside first: they
-hold this repo's run (state files with its ids), and with them `test.py` and
-`deliver.py` resume that run instead of starting a new one. Every script runs
-from the repo root and is safe to rerun.
+**Before your first run, and to run again from scratch,** move `fit/out/` and
+`eval_out/` aside: they hold this repo's run (state files with its ids), and with
+them every stage resumes that run instead of starting yours. Its project and
+blueprints belong to the account that made them, so a stage stops at once when
+your key can't see the recorded project. Without `fit/out/project_state.json`,
+Stage 4 finds your `RED pump quickstart` project by name, or creates it. Every
+script runs from the repo root and is safe to rerun.
 
 ### Stage 0: download
 

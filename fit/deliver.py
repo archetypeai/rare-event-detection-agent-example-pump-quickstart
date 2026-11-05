@@ -33,7 +33,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, save_state, state_path
-from red_api import create_package, deploy, download_results, open_session, poll_session, upload_file
+from red_api import (create_package, deploy, deployment_ready, download_results, open_session, package_ready,
+                     poll_session, upload_file)
 
 OUT = REPO / "eval_out" / "delivery"
 TIMEOUT_S = 4 * 3600
@@ -93,9 +94,11 @@ def main() -> int:
         save()
         log(f"package {state['package']} on {bp['key']} (step {bp['values']['step_size']})")
     if "deployment" not in state:
+        package_ready(state["package"])
         state["deployment"] = deploy(state["package"], "batch")["id"]
         save()
         log(f"batch deployment {state['deployment']}")
+        deployment_ready(state["deployment"])
 
     files = [f for f in m["delivery"] if "incident" in f or args.tail]
     OUT.mkdir(parents=True, exist_ok=True)
