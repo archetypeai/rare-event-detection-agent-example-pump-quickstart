@@ -7,6 +7,7 @@ present: ATAI_API_KEY, ATAI_API_ENDPOINT.
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import os
 import re
@@ -185,7 +186,10 @@ def request(method: str, url: str, body=None, headers=None, raw: bool = False,
                 return payload if raw else json.loads(payload or b"null")
         except urllib.error.HTTPError as e:
             sys.exit(f"{method} {url} failed ({e.code}): {e.read().decode(errors='replace')}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as e:
+            # a body cut off mid-read is retried only for a GET: a POST may already have acted
+            if isinstance(e, http.client.IncompleteRead) and method != "GET":
+                raise
             if attempt == retries:
                 sys.exit(f"{method} {url} failed after {retries + 1} attempts: {e}")
             wait = 5 * (2 ** attempt)
