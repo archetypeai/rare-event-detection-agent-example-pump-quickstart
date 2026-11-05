@@ -503,7 +503,10 @@ curl -s "${ATAI_API_ENDPOINT%/api}/api/agents/deployments?status=ready&limit=100
 (Stages 4–7 on 2026-10-28, 8–9 on 2026-10-29). A run of Stages 4–9 through
 projects, packages, deployments and sessions (dev, 2026-10-31,
 [MIGRATION.md](MIGRATION.md)) gave the same numbers, with delivery outputs
-byte-identical to production's. Prep, Optimize and Evals are
+byte-identical to production's, and so did a rerun of Stages 4–9 and the live monitor
+with a member key in its own project (dev, 2026-11-04): the same trials and test
+predictions, byte-identical delivery and serving outputs, and the library view equal
+to within its rounding. Prep, Optimize and Evals are
 close to deterministic here: runs from scratch, with fresh uploads, a new
 optimization and a new promoted blueprint, gave byte-identical test predictions
 and delivery outputs, and only the platform ids differed. The one difference

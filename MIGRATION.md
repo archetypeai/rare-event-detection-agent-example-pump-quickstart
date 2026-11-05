@@ -2,9 +2,10 @@
 
 How this quickstart moved from bundles and instances to **projects, packages,
 deployments and sessions**, and what to watch for if you move your own scripts.
-Stages 4–9 and the live monitor were run end to end on 2026-10-31. That run used an
-org-admin key, but the scripts make no admin-only call (see 6 below); a run with a
-member key is still to be confirmed.
+Stages 4–9 and the live monitor were run end to end on 2026-10-31 with an org-admin key,
+and again on 2026-11-04 with a member key in a new project: the scripts make no admin-only
+call (see 6 below), and the second run reproduced the first's results, Stages 4–9 and the
+live monitor.
 
 `/api/agents/bundles` and `/api/agents/instances` are being removed: some deployments of
 the platform already answer 404 for them, and the rest keep them only until their next
@@ -164,6 +165,17 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
    `fit/out/deliver_state.json` as soon as they exist: stopped mid-delivery (Ctrl-C), a
    rerun found one session already completed on the platform and only downloaded its
    output.
+
+10. **Record an id before waiting on it.** `create_package` and `deploy` return as soon as
+    the platform accepts them, and `package_ready` / `deployment_ready` wait: a package that
+    fails to build stays `failed`, and only its recorded id lets `fit/cleanup.py` delete it.
+    The serving bridge deletes a failed package, so its retry builds a new one.
+
+11. **Retry a download cut off mid-read.** On 2026-11-04 Stage 5's 7.5 MB predictions
+    download stopped 16 KB short (`IncompleteRead`) after the eval had completed. `red_api.py`
+    now retries a GET whose body was cut off, as it already did a dropped connection; a POST
+    isn't retried, since it may already have acted. Rerunning `fit/test.py` resumed the
+    finished eval and only downloaded.
 
 ## This repo, file by file
 
