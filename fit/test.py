@@ -26,9 +26,9 @@ example) and:
   * scores each incident: detected or missed, the delay after onset, and false
     alarms on windows with no fault row.
 
-On the free trial an eval is stopped after 2 hours and runs on CPU, at about
-9,000 windows of this pump's 10 channels in 1.5 hours, so there (ATAI_API_ENDPOINT
-on try.archetypeai.app) the default is `--max-windows 9000`: an eval per test file,
+On the free trial an eval is stopped after 2 hours, and on CPU it ran at about
+9,000 windows of this pump's 10 channels in 1.5 hours (on GPU, ~2 min), so there
+(ATAI_API_ENDPOINT on try.archetypeai.app) the default is `--max-windows 9000`: an eval per test file,
 a longer file cut into pieces of at most that many windows (fit/out/test-pieces/),
 `--parallel` at a time, pooled. Consecutive pieces overlap by a window less one
 row, so every window of the file is scored exactly once; each eval's confusion
