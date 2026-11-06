@@ -71,7 +71,7 @@ def best_run(opt_state: dict) -> str:
     return best[0]
 
 
-def promote(opt_id: str, trial_id: str | None) -> dict:
+def promote(opt_id: str, trial_id: str | None, key: str | None = None) -> dict:
     opt = request("GET", f"{agents_base()}/optimizations/{opt_id}")
     trials = request("GET", f"{agents_base()}/optimizations/{opt_id}/trials?limit=1000")["data"]
     tid = trial_id or opt.get("best_trial_id")
@@ -87,13 +87,8 @@ def promote(opt_id: str, trial_id: str | None) -> dict:
     body = {
         "name": f"RED pump (w {vals['window_size']}, step {vals['step_size']}, {vals['metric']})",
         "description": f"Promoted from {opt_id}; prototypes from normal rows 0-8,191 and incidents #1-#2."}
-    try:
-        bp = request("POST", url, body={"blueprint_key": f"red-pump-{tid}", **body})
-    except SystemExit as e:
-        # choosing the key needs the admin role (a free-trial org has none): let the platform choose it
-        if "(403)" not in str(e) or "blueprint_key" not in str(e):
-            raise
-        bp = request("POST", url, body=body)
+    # the platform's key unless one is asked for: choosing it needs the admin role outside projects
+    bp = request("POST", url, body={**body, "blueprint_key": key} if key else body)
     log(f"promoted {tid} -> {bp['blueprint_key']} ({bp['id']})")
     return {"id": bp["id"], "key": bp["blueprint_key"], "trial": tid, "values": vals}
 
@@ -232,6 +227,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--optimization", help="default: the best of fit/out/optimize_state.json's runs")
     ap.add_argument("--trial", help="default: the optimization's best trial")
+    ap.add_argument("--blueprint-key", help="promote under this key (needs the admin role outside projects); default: the platform's, <blueprint>-otr_<trial id>")
     ap.add_argument("--max-windows", type=int,
                     help="an eval per test file, cut to at most N windows (default: one eval of all; 9000 on the free trial)")
     ap.add_argument("--parallel", type=int, default=3, help="evals at once with --max-windows (the free trial runs 3)")
@@ -248,7 +244,7 @@ def main() -> int:
     if "blueprint" not in state:
         opt_id = args.optimization or best_run(load_state(state_path("optimize")))
         state["optimization"] = opt_id
-        state["blueprint"] = promote(opt_id, args.trial)
+        state["blueprint"] = promote(opt_id, args.trial, args.blueprint_key)
         save()
 
     v = state["blueprint"]["values"]
