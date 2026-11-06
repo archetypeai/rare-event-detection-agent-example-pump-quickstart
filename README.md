@@ -292,7 +292,8 @@ Try others with `--new` and `--window` (a list, or `LOW:HIGH`), `--step`,
 python3 fit/test.py
 ```
 
-1. **Promote** the best trial to a blueprint, `red-pump-<trial>`: its settings
+1. **Promote** the best trial to a blueprint under the platform's key, `red-otr_<trial>`
+   (`--blueprint-key` chooses the key, which needs the admin role): its settings
    and fitted prototypes become a reusable model.
 2. **Evaluate** the 4 test files **once** with the Evals API, with predictions.
 3. **Check** every prediction's gold label against the file, and the offline
@@ -302,7 +303,7 @@ python3 fit/test.py
 **Expect** (ours):
 
 ```
-eval evl_…  blueprint red-pump-otr_…  (window 64, step 1, dot; 0 abstained)
+eval evl_…  blueprint red-otr_…  (window 64, step 1, dot; 0 abstained)
   platform (each row once): fault F1 0.9642  macro-F1 0.9762  recall 0.9820  precision 0.9470
   whole-window majority (as fit/evaluate_events.py): fault F1 0.9697  tp 9004 fp 448 fn 115 tn 28056
   false alarms 369 / 28,256 = 0.0131 (windows with no fault row)
@@ -343,7 +344,7 @@ python3 fit/deliver.py
 3. **Download** each output, again until it covers its input (a run can report
    `completed` while its output is still being written).
 
-**Expect:** `bundle bnd_… (ready) on red-pump-otr_…`, two `agent agt_…` lines,
+**Expect:** `bundle bnd_… (ready) on red-otr_…`, two `agent agt_…` lines,
 `inc04.csv: complete`, `inc07.csv: complete`, then Stage 7's scores. Each agent
 took about 45 seconds here. **Writes:** `eval_out/delivery/red-output-*.csv` and
 `fit/out/deliver_state.json`.
