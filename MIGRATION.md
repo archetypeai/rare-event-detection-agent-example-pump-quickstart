@@ -5,7 +5,7 @@ deployments and sessions**, and what to watch for if you move your own scripts.
 Stages 4–9 and the live monitor were run end to end on 2026-10-31 with an org-admin key,
 and again on 2026-11-04 with a member key in a new project: the scripts make no admin-only
 call (see 6 below), and the second run reproduced the first's results, Stages 4–9 and the
-live monitor.
+live monitor. A third run, on the staging platform (2026-11-09), reproduced them too.
 
 `/api/agents/bundles` and `/api/agents/instances` are being removed: some deployments of
 the platform already answer 404 for them, and the rest keep them only until their next
@@ -193,13 +193,13 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
 
 ## Results against the bundle version
 
-| Stage | Measure | Bundles (production, 2026-10-28/29) | Packages and sessions (dev, 2026-10-31) |
-|---|---|---|---|
-| 4 | fault F1, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same, with the same confusion matrices |
-| 5 | test fault F1 (whole-window); false alarms; breakdowns | 0.9697; 369 / 28,256; +54, +0, missed, +60 | the same, with the same confusion counts |
-| 6–7 | delivery fault F1; false alarms; breakdowns | 0.9013; 45 / 3,844; +54, +60 | byte-identical outputs and evaluation; two sessions, about a minute each |
-| 8 | served against batch, 1,162 windows | every state and probability identical; 436 ms median | the same; 352 ms median |
-| 9 | library view; the monitor | 3,016 windows, PC1+PC2 32.5% + 4.0% | the same, to within its rounding; the monitor runs on the embeddings blueprint |
+| Stage | Measure | Bundles (production, 2026-10-28/29) | Packages and sessions (dev, 2026-10-31) | Packages and sessions (staging, 2026-11-09) |
+|---|---|---|---|---|
+| 4 | fault F1, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same, with the same confusion matrices | the same |
+| 5 | test fault F1 (whole-window); false alarms; breakdowns | 0.9697; 369 / 28,256; +54, +0, missed, +60 | the same, with the same confusion counts | the same, test predictions byte-identical |
+| 6–7 | delivery fault F1; false alarms; breakdowns | 0.9013; 45 / 3,844; +54, +60 | byte-identical outputs and evaluation; two sessions, about a minute each | byte-identical outputs and evaluation |
+| 8 | served against batch, 1,162 windows | every state and probability identical; 436 ms median | the same; 352 ms median | the same, served CSV byte-identical; 426 ms median |
+| 9 | library view; the monitor | 3,016 windows, PC1+PC2 32.5% + 4.0% | the same, to within its rounding; the monitor runs on the embeddings blueprint | the same, to within its rounding; the monitor runs |
 
 ## Moving your own scripts
 

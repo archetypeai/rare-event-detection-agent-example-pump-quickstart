@@ -506,7 +506,10 @@ projects, packages, deployments and sessions (dev, 2026-10-31,
 byte-identical to production's, and so did a rerun of Stages 4–9 and the live monitor
 with a member key in its own project (dev, 2026-11-04): the same trials and test
 predictions, byte-identical delivery and serving outputs, and the library view equal
-to within its rounding. Prep, Optimize and Evals are
+to within its rounding. A rerun of Stages 4–9 and the live monitor on the staging
+platform, which now serves Agent Lifecycle 2.0 too (2026-11-09), gave the same numbers:
+byte-identical test predictions, delivery outputs, evaluation and served CSV (426 ms a
+query), and the library view equal to within its rounding. Prep, Optimize and Evals are
 close to deterministic here: runs from scratch, with fresh uploads, a new
 optimization and a new promoted blueprint, gave byte-identical test predictions
 and delivery outputs, and only the platform ids differed. The one difference
