@@ -79,7 +79,7 @@ and the Optimizations and Evals APIs return metrics and predictions, not
 embeddings. So the training windows are encoded again, on the platform:
 
 ```sh
-python3 fit/library_embeddings.py     # after each Stage 5, from the repo root: the embeddings blueprint, 3 batch sessions
+python3 fit/library_embeddings.py     # after each Stage 5, from the repo root: the embeddings blueprint, 3 batch sessions, a few minutes
 ```
 
 It first makes the embeddings blueprint the bridge serves: a 1-trial optimization at

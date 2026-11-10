@@ -32,7 +32,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, save_state, state_path
+from atai import REPO, ROLES, free_trial, load_dotenv, load_state, log, manifest, save_state, state_path
 from red_api import (create_package, deploy, deployment_ready, download_results, open_session, package_ready,
                      poll_session, upload_file)
 
@@ -68,9 +68,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tail", action="store_true", help="also deliver the five tail chunks")
-    ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--parallel", type=int, help="runs at once (default 4; 3 on the free trial, its limit of jobs at once)")
     args = ap.parse_args()
     load_dotenv()
+    if args.parallel is None:
+        args.parallel = 3 if free_trial() else 4
     m = manifest()
     test = load_state(state_path("test"))
     if "blueprint" not in test:

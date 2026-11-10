@@ -53,6 +53,9 @@ flowchart LR
 
 - **Skip the download:** Stage 1's prepared files and the role files are in the
   repo, in Git LFS. See [Shortcuts](#shortcuts-skip-the-download).
+- **On the free trial** (`try.archetypeai.app`) the same commands work, with no
+  extra flags; Stages 4–8 take about **15 minutes** there. See
+  [On the free trial](#on-the-free-trial).
 
 ## The scenario
 
@@ -148,6 +151,49 @@ not).
   with Stage 0.
 
 Then go to [Stage 4](#stage-4-optimize).
+
+### On the free trial
+
+The free trial (`ATAI_API_ENDPOINT=https://try.archetypeai.app/api`, in
+`.env.example`) runs optimizations on GPU (always), evals and agent runs on GPU
+since 2026-11-06 (CPU before), and agent serving on CPU, at most 3 jobs per org at
+once, and stops every job after 2 hours (`DeadlineExceeded`, with no output). On
+CPU an eval scored about 950 windows × channels a minute, so Stage 5's one eval of
+the 4 test files (37,623 windows of 10 channels) would have needed over 6 hours.
+The defaults below stay, and keep every job to a few minutes.
+
+**How the scripts know:** `fit/atai.py`'s `free_trial()` is true when the
+endpoint's host is `try.archetypeai.app` (a free-trial key works nowhere else).
+Then two defaults change, and each script says so when it starts:
+
+| stage | production default | free-trial default | why |
+|---|---|---|---|
+| 5 `fit/test.py` | one eval of the 4 test files | `--max-windows 9000`: an eval per file, inc05 cut in two, 5 evals, 3 at a time, pooled | on CPU, an eval of more than ~100,000 windows × channels ran past 2 hours |
+| 6 `fit/deliver.py` | `--parallel 4` sessions | `--parallel 3` | 3 jobs at once |
+
+`fit/library_embeddings.py` runs its 3 files at once on either. A flag you give
+wins, on either deployment (`--max-windows 0` for one eval).
+
+**What it gives** (ours, 2026-11-06, through bundles and agent runs, which the free trial
+still serves; evals and agent runs on GPU; on CPU, 2026-10-31, the same numbers took
+about 3.5 hours). The free trial doesn't serve packages, deployments and sessions yet, so
+Stages 6, 8 and 9 of this version can't run there until it does:
+
+| stage | free trial | production |
+|---|---|---|
+| 4 | 3 min; the same 4 trials and scores | 3 min |
+| 5 | 5 evals in 4 min (about 2 min each); the confusion matrix, every metric and every breakdown's detection, delay and false alarms **identical** | 4 min |
+| 6 | 1 min; Stage 7's scores **identical** | 1 min |
+| 8 | 1,162 windows in 7 min, every state and probability matching Stage 6, median 336 ms a query (serving is on CPU) | 10 min, 436 ms |
+| 9 | `fit/library_embeddings.py` 1.5 min, the view identical to the repo's; the app's agent answering in 0.28 s (median) | a few minutes |
+
+- **Every window is scored once, as in one eval.** Consecutive pieces of inc05
+  overlap by 63 rows (a window less one), so each window falls in exactly one piece;
+  the first window of a piece answers for all its rows rather than one, which here
+  changed no count.
+- **A queued job may already be on the clock** (it reports `running`). Keep other jobs
+  (another example, a serving session, `app-serving/`) off the account while Stage 5
+  runs.
 
 ## The stages
 
@@ -273,7 +319,9 @@ Try others with `--new` and `--window` (a list, or `LOW:HIGH`), `--step`,
 python3 fit/test.py
 ```
 
-1. **Promote** the best trial to a blueprint, `red-pump-<trial>`: its settings
+1. **Promote** the best trial to a blueprint in the project, under the platform's key,
+   `red-pump-otr_<trial>` (`--blueprint-key` chooses the key, which needs the admin
+   role): its settings
    and fitted prototypes become a reusable model.
 2. **Evaluate** the 4 test files **once** with the Evals API, with predictions.
 3. **Check** every prediction's gold label against the file, and the offline
@@ -304,6 +352,10 @@ eval evl_…  blueprint red-pump-otr_…  (window 64, step 1, dot; 0 abstained)
 - **This is the one-shot test.** Once you have seen its number, the setting is
   frozen: tuning it further would make the test number optimistic.
 
+**On the free trial** it runs 5 evals of at most 9,000 windows each and pools them
+(`--max-windows 9000`, [above](#on-the-free-trial)): about 4 minutes, with the
+same numbers.
+
 **Writes:** `fit/out/test.json`, `fit/out/test-predictions.ndjson` and
 `fit/out/test_state.json` (the ids, so a rerun resumes instead of testing again).
 
@@ -328,6 +380,9 @@ python3 fit/deliver.py
 `session ses_…` lines, `inc04.csv: complete`, `inc07.csv: complete`, then Stage 7's
 scores. Each session took about a minute here. **Writes:** `eval_out/delivery/red-output-*.csv` and
 `fit/out/deliver_state.json`.
+
+**On the free trial** the two agents took about a minute through bundles, with the same
+outputs; it doesn't serve packages, deployments and sessions yet.
 
 ### Stage 7: score the delivery
 
