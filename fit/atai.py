@@ -51,14 +51,21 @@ def base_blueprint() -> dict:
     path = state_path("project")
     state = load_state(path)
     if "project" not in state:
-        found = [p for p in request("GET", f"{api_base()}/projects?limit=1000")["data"] if p["name"] == PROJECT]
+        found, after = [], ""
+        while True:                                  # every page: the cursor is opaque, passed back as is
+            page = request("GET", f"{api_base()}/projects?limit=1000{after}")
+            found += [p for p in page.get("data", []) if p["name"] == PROJECT]
+            if not page.get("has_more"):
+                break
+            after = f"&after={page['next_cursor']}"
         state["project"] = found[0]["id"] if found else request(
             "POST", f"{api_base()}/projects", body={
                 "name": PROJECT, "description": "Rare Event Detection agent on pump breakdowns"})["id"]
         save_state(path, state)
         log(f"project {state['project']} ({PROJECT})")
     if "base" not in state:
-        found = request("GET", f"{agents_base()}/blueprints?project_id={state['project']}&key={BASE_KEY}")["data"]
+        found = [b for b in request("GET", f"{agents_base()}/blueprints?project_id={state['project']}&key={BASE_KEY}")["data"]
+                 if b.get("blueprint_key") == BASE_KEY]   # never a blueprint promoted from it
         if found:
             bp = found[0]
             log(f"reusing {BASE_KEY} in {state['project']} ({bp['id']})")

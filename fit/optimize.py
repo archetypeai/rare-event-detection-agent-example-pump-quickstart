@@ -14,7 +14,7 @@ Each option takes one value (pinned in `overrides.values` for every trial),
 several (searched), or for window and step LOW:HIGH (an inclusive integer
 range). The platform draws distinct points at random: a list with no more
 points than --trials runs every combination (a grid); a range, or a budget
-smaller than the grid, is a random search. Dev seeds the draw from the OS, so
+smaller than the grid, is a random search. The platform seeds the draw from the OS, so
 the points differ between runs; each optimization records the ones it drew. `metric` is the classifier's only fit knob; trials that share
 `window_size` and `step_size` share one encoder pass, so searching the metric is
 nearly free and each window or step adds a pass over every file.

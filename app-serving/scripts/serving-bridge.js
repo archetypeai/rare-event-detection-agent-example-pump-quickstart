@@ -217,8 +217,9 @@ async function shutdown(sig) {
 	let left = 0;
 	try {
 		for (const id of [...live.sessions]) if (!(await dropSession(id))) left++;
-		if (!left && !(await dropDeployment())) left++;
-		if (!left && live.package && !(await drop(`/packages/${live.package}`))) left++;
+		// stop the deployment even if a session wouldn't go: stopping releases the worker
+		if (!(await dropDeployment())) left++;
+		else if (live.package && !(await drop(`/packages/${live.package}`))) left++;
 		if (left) {
 			// Keep the ids for fit/cleanup.py rather than leaving them on the platform unrecorded.
 			console.error(`bridge: not everything was deleted; run python3 fit/cleanup.py --yes (ids in ${path.relative(REPO, STATE)})`);

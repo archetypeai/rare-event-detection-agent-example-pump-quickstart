@@ -48,8 +48,8 @@ import numpy as np
 
 from atai import (COLUMN, OUT as FIT_OUT, PRIMARY, REPO, ROLES, agents_base, constant, example, load_dotenv,
                   load_state, log, manifest, request, save_state, state_path, upload_all, wait)
-from red_api import (create_package, deploy, deployment_ready, download_results, open_session, package_ready,
-                     poll_session, upload_file)
+from red_api import (deploy, deployment_ready, download_results, end, open_session, poll_session, ready_package,
+                     upload_file)
 from test import promote
 
 CLASSES = ["normal", "pump_breakdown"]
@@ -162,10 +162,7 @@ def main() -> int:
             save_state(path, state)
     if "deployment" not in state:
         emb = embeddings_blueprint(m, bp, state, save)
-        if "package" not in state:
-            state["package"] = create_package(emb["id"], "RED library embeddings")["id"]
-            save()
-        package_ready(state["package"])
+        ready_package(state, emb["id"], "RED library embeddings", save, log)   # a failed one is rebuilt, once
         state["deployment"] = deploy(state["package"], "batch")["id"]
         save()
         deployment_ready(state["deployment"])
@@ -188,10 +185,22 @@ def main() -> int:
             log(f"{src.name}: session {ses}")
         if poll_session(runs[f["file"]], 4 * 3600, interval_s=60) != "completed":
             log(f"{src.name}: session did not report completed; trying /results anyway")
-        if download_results(runs[f["file"]], str(dst) + ".part", input_csv=str(src)):
+        try:
+            got = download_results(runs[f["file"]], str(dst) + ".part", input_csv=str(src))
+        except SystemExit as e:              # /results refused: replaced like a short output
+            log(f"{src.name}: {e}")
+            got = None
+        if got:
             Path(str(dst) + ".part").rename(dst)
             log(f"{src.name}: complete")
             return dst
+        try:                                 # end and forget it: the next run opens a new session
+            end("sessions", runs[f["file"]])
+        except SystemExit as e:
+            log(f"{src.name}: could not end {runs[f['file']]}: {e}")
+        with lock:
+            runs.pop(f["file"])
+        save()
         log(f"{src.name}: no complete output; rerun to retry")
         return None
 

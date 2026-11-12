@@ -87,14 +87,17 @@ def lifecycle_url(kind: str, obj_id: str | None = None, suffix: str = "") -> str
     return f"{url}{suffix}"
 
 
-def _wait_for(kind: str, obj_id: str, want: str, waiting: str, timeout_s: int = 600, every_s: int = 3) -> dict:
+def _wait_for(kind: str, obj_id: str, want: str, waiting: str, timeout_s: int = 600, every_s: int = 3,
+              exit: bool = True) -> dict:
     t0 = time.time()
     while True:
         obj = request("GET", lifecycle_url(kind, obj_id))
         if obj["status"] == want:
             return obj
         if obj["status"] != waiting or time.time() - t0 > timeout_s:
-            sys.exit(f"{obj_id} is {obj['status']}, not {want}: {obj.get('error')}")
+            if exit:
+                sys.exit(f"{obj_id} is {obj['status']}, not {want}: {obj.get('error')}")
+            return obj
         time.sleep(every_s)
 
 
@@ -109,6 +112,37 @@ def create_package(blueprint_id: str, name: str) -> dict:
 
 def package_ready(package_id: str) -> dict:
     return _wait_for("packages", package_id, "ready", "building", every_s=5)
+
+
+def ready_package(state: dict, blueprint_id: str, name: str, save, log=print) -> dict:
+    """state["package"] once ready, created (and saved) first if there is none. A failed
+    package never becomes ready, so it is deleted and built again, once: a rerun after a
+    failed build doesn't stop on the same package."""
+    for attempt in range(2):
+        if not state.get("package"):
+            state["package"] = create_package(blueprint_id, name)["id"]
+            save()
+            log(f"package {state['package']} ({name})")
+        pkg = _wait_for("packages", state["package"], "ready", "building", every_s=5, exit=False)
+        if pkg["status"] == "ready":
+            return pkg
+        if pkg["status"] != "failed" or attempt:
+            sys.exit(f"{state['package']} is {pkg['status']}, not ready: {pkg.get('error')}")
+        log(f"{state['package']} failed ({pkg.get('error')}): deleting it and building a new one")
+        end("packages", state["package"])
+        state.pop("package")
+        state.pop("deployment", None)
+        save()
+
+
+def status_of(kind: str, obj_id: str) -> str | None:
+    """An object's status, or None once it is gone (404)."""
+    try:
+        return request("GET", lifecycle_url(kind, obj_id))["status"]
+    except SystemExit as e:
+        if "(404)" in str(e):
+            return None
+        raise
 
 
 def deploy(package_id: str, kind: str) -> dict:
@@ -145,9 +179,9 @@ def end(kind: str, obj_id: str) -> None:
             return
         raise
     if kind == "sessions" and obj["status"] not in TERMINAL:
-        request("POST", lifecycle_url(kind, obj_id, "/cancel"), body={})
+        request("POST", lifecycle_url(kind, obj_id, "/cancel"), body={}, idempotent=True)
     if kind == "deployments" and obj["status"] not in ("stopped", "failed"):
-        request("POST", lifecycle_url(kind, obj_id, "/stop"), body={})
+        request("POST", lifecycle_url(kind, obj_id, "/stop"), body={}, idempotent=True)
     request("DELETE", lifecycle_url(kind, obj_id), raw=True)
 
 
@@ -167,14 +201,15 @@ def list_ids(kind: str, **query: str) -> list[str]:
 
 
 def request(method: str, url: str, body=None, headers=None, raw: bool = False,
-            retries: int = 4):
-    """Call the API, retrying transient network failures.
-
-    Polls run for hours, and a single DNS hiccup or socket timeout used to kill
-    the whole client while the platform job carried on running unattended — the
-    job then finished with nobody to download its output. Only *network* errors
-    retry; an HTTP status is a real answer from the server and still exits.
+            retries: int = 4, idempotent: bool | None = None):
+    """Call the API, retrying transient failures (network errors, 502/503/504) of calls that
+    are safe to repeat: GET, HEAD and DELETE, and POSTs marked idempotent (cancel, stop, a
+    serving query). A create POST never retries: a repeat could make a second object that
+    nothing records, such as a serving deployment holding a worker. Any other HTTP status
+    is the server's answer and exits.
     """
+    if not (method in ("GET", "HEAD", "DELETE") if idempotent is None else idempotent):
+        retries = 0
     data = json.dumps(body).encode() if body is not None else None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, method=method)
@@ -188,11 +223,12 @@ def request(method: str, url: str, body=None, headers=None, raw: bool = False,
                 payload = resp.read()
                 return payload if raw else json.loads(payload or b"null")
         except urllib.error.HTTPError as e:
-            sys.exit(f"{method} {url} failed ({e.code}): {e.read().decode(errors='replace')}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as e:
-            # a body cut off mid-read is retried only for a GET: a POST may already have acted
-            if isinstance(e, http.client.IncompleteRead) and method != "GET":
-                raise
+            if e.code not in (502, 503, 504) or attempt == retries:
+                sys.exit(f"{method} {url} failed ({e.code}): {e.read().decode(errors='replace')}")
+            print(f"  {method} {url}: HTTP {e.code}; retrying in {5 * (2 ** attempt)}s [{attempt + 1}/{retries}]")
+            time.sleep(5 * (2 ** attempt))
+            continue
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
             if attempt == retries:
                 sys.exit(f"{method} {url} failed after {retries + 1} attempts: {e}")
             wait = 5 * (2 ** attempt)
@@ -247,10 +283,8 @@ def poll_session(session_id: str, timeout_s: int, interval_s: int = 20) -> str:
 
 
 # The platform can report a run completed while its output file is still being
-# written (a known issue), so the output
-# counts as complete only once its last window ends at the input's end: within
-# one window span (an output row's finish - start) plus a minute. The same check
-# as the agent-skills RED and AD skills.
+# written, so the output counts as complete only once its last window ends at the
+# input's end: within one window span (an output row's finish - start) plus a minute.
 END_SLACK_S = 60
 OUTPUT_WAIT_S = 600
 
@@ -373,7 +407,7 @@ def download_results(session_id: str, out_path: str, input_csv: str | None = Non
         print(f"  {inner.get('filename') or item.get('id')}  "
               f"({inner.get('num_bytes', '?')} bytes)")
     inner = items[0].get("data") or {}
-    ref = inner.get("ref") or item.get("ref") or item.get("url")
+    ref = inner.get("ref") or items[0].get("ref") or items[0].get("url")
     if not ref:
         print("  results carried no download ref")
         return None

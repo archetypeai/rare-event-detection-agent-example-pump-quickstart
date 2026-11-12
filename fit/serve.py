@@ -140,7 +140,7 @@ def main() -> int:
                 body = {"model": MODEL, "query": "", "events": [{"type": "data.numeric_array",
                         "event_data": {"contents": [chunk[:, c].tolist() for c in range(len(channels))]}}]}
                 t = time.time()
-                answer = request("POST", lifecycle_url("sessions", state["session"], "/query"), body=body)
+                answer = request("POST", lifecycle_url("sessions", state["session"], "/query"), body=body, idempotent=True)
                 latency.append(time.time() - t)
                 records = (answer.get("response") or {}).get("data")
                 if not isinstance(records, list) or len(records) != count:
@@ -148,18 +148,21 @@ def main() -> int:
                 got.extend(records)
             log(f"  {name}: {n} windows, {time.time() - t_start:.0f} s so far")
     finally:
+        handlers = {sig: signal.signal(sig, signal.SIG_IGN)   # a second signal mustn't cut the cleanup short
+                    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         done = True
-        for kind in ("session", "deployment", "package"):     # each holds the next
+        for kind in ("session", "deployment", "package"):     # each tried, even when one before it fails
             if state.get(kind):
                 try:
                     end(f"{kind}s", state[kind])
                 except SystemExit as e:
                     log(f"cleanup: {e}; fit/cleanup.py retries it")
                     done = False
-                    break
         if done:
             live.unlink(missing_ok=True)
             log(f"ended and deleted {', '.join(state[k] for k in ('session', 'deployment', 'package') if state.get(k))}")
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
     elapsed = time.time() - t_start
 
     rows, per_file = [], []

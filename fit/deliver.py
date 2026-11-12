@@ -33,8 +33,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from atai import REPO, ROLES, free_trial, load_dotenv, load_state, log, manifest, save_state, state_path
-from red_api import (create_package, deploy, deployment_ready, download_results, open_session, package_ready,
-                     poll_session, upload_file)
+from red_api import (deploy, deployment_ready, download_results, end, open_session, poll_session, ready_package,
+                     status_of, upload_file)
 
 OUT = REPO / "eval_out" / "delivery"
 TIMEOUT_S = 4 * 3600
@@ -91,16 +91,15 @@ def main() -> int:
 
     if "bundle" in state:
         raise SystemExit(f"{STATE} is from a bundle delivery: move it aside to deliver through a package")
-    if "package" not in state:
-        state["package"] = create_package(bp["id"], "RED pump delivery")["id"]
+    if state.get("deployment") and status_of("deployments", state["deployment"]) not in ("ready", "deploying"):
+        state.pop("deployment")                     # failed or gone: deploy the package again
         save()
-        log(f"package {state['package']} on {bp['key']} (step {bp['values']['step_size']})")
     if "deployment" not in state:
-        package_ready(state["package"])
+        ready_package(state, bp["id"], "RED pump delivery", save, log)   # a failed one is rebuilt, once
         state["deployment"] = deploy(state["package"], "batch")["id"]
         save()
-        log(f"batch deployment {state['deployment']}")
-        deployment_ready(state["deployment"])
+        log(f"batch deployment {state['deployment']} of {state['package']} on {bp['key']} (step {bp['values']['step_size']})")
+    deployment_ready(state["deployment"])
 
     files = [f for f in m["delivery"] if "incident" in f or args.tail]
     OUT.mkdir(parents=True, exist_ok=True)
@@ -123,13 +122,22 @@ def main() -> int:
             log(f"{src.name}: session did not report completed; trying /results anyway")
         # red_api waits until the output's last window reaches the input's end;
         # the full count also catches windows missing in the middle.
-        if download_results(runs[src.stem], str(dst), input_csv=str(src)):
+        try:
+            got = download_results(runs[src.stem], str(dst), input_csv=str(src))
+        except SystemExit as e:              # /results refused: replaced like a short output
+            log(f"{src.name}: {e}")
+            got = None
+        if got:
             problem = complete(dst, src, window)
             if not problem:
                 log(f"{src.name}: complete")
                 return dst
             log(f"{src.name}: output incomplete ({problem})")
         dst.unlink(missing_ok=True)
+        try:
+            end("sessions", runs[src.stem])         # one that timed out may still be running
+        except SystemExit as e:
+            log(f"{src.name}: could not end {runs[src.stem]}: {e}")
         with lock:
             runs.pop(src.stem)
         save()
