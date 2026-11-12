@@ -1,5 +1,5 @@
 {
- "blueprint": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
+ "blueprint": "red-pump-otr_0s9wtj5x149mtbed03m24yda7x",
  "files": [
   {
    "file": "inc04",
@@ -46,9 +46,9 @@
  "max_p_diff": 0.0,
  "invalid": 0,
  "latency_ms": {
-  "median": 436,
-  "p95": 724,
-  "max": 8701
+  "median": 350,
+  "p95": 557,
+  "max": 661
  },
- "replay_seconds": 591.5
+ "replay_seconds": 465.4
 }

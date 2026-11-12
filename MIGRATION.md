@@ -2,14 +2,12 @@
 
 How this quickstart moved from bundles and instances to **projects, packages,
 deployments and sessions**, and what to watch for if you move your own scripts.
-Stages 4–9 and the live monitor were run end to end on 2026-10-31 with an org-admin key,
-and again on 2026-11-04 with a member key in a new project: the scripts make no admin-only
-call (see 6 below), and the second run reproduced the first's results, Stages 4–9 and the
-live monitor. A third run, on the staging platform (2026-11-09), reproduced them too.
+Stages 4–9 were run end to end on production on 2026-11-12 with a member key in a new
+project, and earlier with an org-admin key: the scripts make no admin-only call (see 6
+below), and every run gave the same results, Stages 4–9 and the live monitor.
 
-`/api/agents/bundles` and `/api/agents/instances` are being removed: some deployments of
-the platform already answer 404 for them, and the rest keep them only until their next
-platform release. Move to the calls below. A deployment serves the new calls
+`/api/agents/bundles` and `/api/agents/instances` are removed: production answers 404 for
+them. Move to the calls below. A deployment serves the new calls
 when `GET {root}/api/agents/sessions?limit=1` answers 200, not 404.
 
 ## Before and after
@@ -119,8 +117,8 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
    project, and `POST /optimizations` takes no `project_id`, so Stage 4 copies `red` into
    the project first and optimizes the copy (`fit/atai.py`, `base_blueprint()`). An
    existing project of that name, and an existing copy under `red-pump`, are reused.
-   With the copy keyed `red-pump`, the platform's default key for a promoted trial,
-   `red-pump-<trial id>`, is the one `fit/test.py` chooses.
+   With the copy keyed `red-pump`, the platform keys a promoted trial
+   `red-pump-otr_<trial id>`; `fit/test.py` sends no key of its own unless `--blueprint-key`.
 
 2. **Nothing to pin that wasn't already.** The bundles added `step_size: 1`, which was
    the trial's own step, and Stage 4 already pinned `data_columns`, `timestamp_column`,
@@ -148,8 +146,8 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
    have a fallback:
    - `POST /blueprints` (registering an edited copy of a promoted blueprint, e.g. with
      embeddings on) takes the admin role; the 1-trial optimization doesn't;
-   - choosing `blueprint_key` on promote takes it too: `fit/test.py` tries its own key and,
-     on a 403, lets the platform choose, which here is the same key.
+   - choosing `blueprint_key` on promote takes it too: `fit/test.py` lets the platform
+     choose, unless you pass `--blueprint-key`.
 
 7. **A session's result `ref` is a root path.** `/sessions/{id}/results` returns
    `ref: "/api/files/<fil_…>/content"`, which already includes `/api`: resolve it against
@@ -173,8 +171,9 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
 
 11. **Retry a download cut off mid-read.** On 2026-11-04 Stage 5's 7.5 MB predictions
     download stopped 16 KB short (`IncompleteRead`) after the eval had completed. `red_api.py`
-    now retries a GET whose body was cut off, as it already did a dropped connection; a POST
-    isn't retried, since it may already have acted. Rerunning `fit/test.py` resumed the
+    retries a GET, HEAD or DELETE whose body was cut off or whose connection dropped (and
+    cancel, stop and serving queries, which are safe to repeat); a create POST isn't retried,
+    since it may already have acted. Rerunning `fit/test.py` resumed the
     finished eval and only downloaded.
 
 ## This repo, file by file
@@ -193,13 +192,13 @@ Statuses: package `building → ready | failed`; deployment `deploying → ready
 
 ## Results against the bundle version
 
-| Stage | Measure | Bundles (production, 2026-10-28/29) | Packages and sessions (dev, 2026-10-31) | Packages and sessions (staging, 2026-11-09) |
-|---|---|---|---|---|
-| 4 | fault F1, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same, with the same confusion matrices | the same |
-| 5 | test fault F1 (whole-window); false alarms; breakdowns | 0.9697; 369 / 28,256; +54, +0, missed, +60 | the same, with the same confusion counts | the same, test predictions byte-identical |
-| 6–7 | delivery fault F1; false alarms; breakdowns | 0.9013; 45 / 3,844; +54, +60 | byte-identical outputs and evaluation; two sessions, about a minute each | byte-identical outputs and evaluation |
-| 8 | served against batch, 1,162 windows | every state and probability identical; 436 ms median | the same; 352 ms median | the same, served CSV byte-identical; 426 ms median |
-| 9 | library view; the monitor | 3,016 windows, PC1+PC2 32.5% + 4.0% | the same, to within its rounding; the monitor runs on the embeddings blueprint | the same, to within its rounding; the monitor runs |
+| Stage | Measure | Bundles (production, 2026-10-28/29) | Packages and sessions (production, 2026-11-12) |
+|---|---|---|---|
+| 4 | fault F1, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same, with the same confusion matrices |
+| 5 | test fault F1 (whole-window); false alarms; breakdowns | 0.9697; 369 / 28,256; +54, +0, missed, +60 | the same, with the same confusion counts |
+| 6–7 | delivery fault F1; false alarms; breakdowns | 0.9013; 45 / 3,844; +54, +60 | byte-identical outputs and evaluation |
+| 8 | served against batch, 1,162 windows | every state and probability identical; 436 ms median | the same; 350 ms median |
+| 9 | library view; the monitor | 3,016 windows, PC1+PC2 32.5% + 4.0% | the same, to within its rounding; the monitor runs on the embeddings blueprint |
 
 ## Moving your own scripts
 

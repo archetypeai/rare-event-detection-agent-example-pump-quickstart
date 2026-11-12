@@ -1,10 +1,10 @@
 {
  "endpoint": "https://platform.u1.archetypeai.app/api",
- "optimization": "opt_7sww67qwbr9vrr4drq7p2pta9v",
+ "optimization": "opt_1ptxrehg739q6rkzhgjpbzy01v",
  "blueprint": {
-  "id": "blp_2d0p62hb3q8tbavg3rydaqe8bc",
-  "key": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
-  "trial": "otr_17eqj079pz82ka5kpeghtja7kw",
+  "id": "blp_43g532wsy18ne8xfrd0r2h1dys",
+  "key": "red-pump-otr_0s9wtj5x149mtbed03m24yda7x",
+  "trial": "otr_0s9wtj5x149mtbed03m24yda7x",
   "values": {
    "background": "normal",
    "data_columns": [
@@ -29,5 +29,7 @@
    "metric": "dot"
   }
  },
- "eval": "evl_5jvhr27th48bms6stnrkc8yvv1"
+ "evals": [
+  "evl_5djebh44688438865m2ckbb9ge"
+ ]
 }

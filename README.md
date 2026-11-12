@@ -61,7 +61,7 @@ flowchart LR
 
 - **A plant has had a handful of failures and labelled two of them.** It wants to
   know when the same thing happens again. Here: a water pump, broken down seven
-  times in five months; the customer labels the first two.
+  times in five months; its first two are labelled.
 - **Settings are chosen on the next breakdown** (validation): #3.
 - **We report how the agent does on breakdowns it has never seen** (the test),
   once: #4–#7.
@@ -174,10 +174,10 @@ Then two defaults change, and each script says so when it starts:
 `fit/library_embeddings.py` runs its 3 files at once on either. A flag you give
 wins, on either deployment (`--max-windows 0` for one eval).
 
-**What it gives** (ours, 2026-11-06, through bundles and agent runs, which the free trial
-still serves; evals and agent runs on GPU; on CPU, 2026-10-31, the same numbers took
-about 3.5 hours). The free trial doesn't serve packages, deployments and sessions yet, so
-Stages 6, 8 and 9 of this version can't run there until it does:
+**What it gives** (ours, 2026-11-06, through bundles and agent runs; evals and agent runs on
+GPU; on CPU, 2026-10-31, the same numbers took about 3.5 hours). This version's Stages 6, 8
+and 9 haven't been run on the free trial yet: check that it serves the new calls first
+(`GET /api/agents/sessions?limit=1` answers 200, not 404):
 
 | stage | free trial | production |
 |---|---|---|
@@ -382,7 +382,7 @@ scores. Each session took about a minute here. **Writes:** `eval_out/delivery/re
 `fit/out/deliver_state.json`.
 
 **On the free trial** the two agents took about a minute through bundles, with the same
-outputs; it doesn't serve packages, deployments and sessions yet.
+outputs; this version hasn't been run there yet.
 
 ### Stage 7: score the delivery
 
@@ -545,26 +545,22 @@ curl -s "${ATAI_API_ENDPOINT%/api}/api/agents/deployments?status=ready&limit=100
 
 ## Results
 
-| stage | measure | ours (production, bundles) | packages and sessions (dev, 2026-10-31) |
+| stage | measure | production, bundles | production, packages and sessions (2026-11-12) |
 |---|---|---|---|
 | 1–3 | prepared and role files | every role check passed | (reused) |
 | 4 | fault F1 on breakdown #3, `dot` / `cosine` / `l2` / `l1` | 0.8588 / 0.8474 / 0.8400 / 0.8325 | the same |
 | 5 | test: fault F1 (whole-window); false alarms; breakdowns caught | 0.9697; 1.31%; 3 of 4 (+54, +0, missed, +60) | the same, with the same confusion counts |
 | 6–7 | delivery: fault F1; false alarms; breakdowns caught | 0.9013; 1.17%; 2 of 2 (+54, +60) | byte-identical outputs and evaluation |
-| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 436 ms a query | the same; 352 ms a query |
+| 8 | served against delivered, 1,162 windows around the breakdowns | every state and probability identical; +54, +60; 45 false alarms, the same; 436 ms a query | the same; 350 ms a query |
 | 9 | the live monitor, breakdown #4's demo window (1,023 windows) | served from the platform, the same windows as Stage 8 | the same, from the embeddings blueprint; the library view equal to within its rounding |
 
-`fit/out/`, `eval_out/` and the numbers above are our run on production
-(Stages 4–7 on 2026-10-28, 8–9 on 2026-10-29). A run of Stages 4–9 through
-projects, packages, deployments and sessions (dev, 2026-10-31,
-[MIGRATION.md](MIGRATION.md)) gave the same numbers, with delivery outputs
-byte-identical to production's, and so did a rerun of Stages 4–9 and the live monitor
-with a member key in its own project (dev, 2026-11-04): the same trials and test
-predictions, byte-identical delivery and serving outputs, and the library view equal
-to within its rounding. A rerun of Stages 4–9 and the live monitor on the staging
-platform, which now serves Agent Lifecycle 2.0 too (2026-11-09), gave the same numbers:
-byte-identical test predictions, delivery outputs, evaluation and served CSV (426 ms a
-query), and the library view equal to within its rounding. Prep, Optimize and Evals are
+`fit/out/`, `eval_out/` and the numbers above are our run on production through
+projects, packages, deployments and sessions (Stages 4–9 on 2026-11-12, a member key in a
+new project; [MIGRATION.md](MIGRATION.md)). It gave the same numbers as the earlier run
+through bundles: the same trials and confusion counts, delivery outputs byte-identical,
+every served state identical to batch, and the library view equal to within its rounding.
+Earlier runs through packages and sessions, with an org-admin key and with a member key,
+gave the same numbers too. Prep, Optimize and Evals are
 close to deterministic here: runs from scratch, with fresh uploads, a new
 optimization and a new promoted blueprint, gave byte-identical test predictions
 and delivery outputs, and only the platform ids differed. The one difference
