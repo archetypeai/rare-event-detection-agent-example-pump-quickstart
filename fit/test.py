@@ -71,7 +71,7 @@ def best_run(opt_state: dict) -> str:
     return best[0]
 
 
-def promote(opt_id: str, trial_id: str | None, key: str | None = None) -> dict:
+def promote(opt_id: str, trial_id: str | None, key: str | None = None, name: str | None = None) -> dict:
     opt = request("GET", f"{agents_base()}/optimizations/{opt_id}")
     trials = request("GET", f"{agents_base()}/optimizations/{opt_id}/trials?limit=1000")["data"]
     tid = trial_id or opt.get("best_trial_id")
@@ -85,7 +85,7 @@ def promote(opt_id: str, trial_id: str | None, key: str | None = None) -> dict:
         return {"id": bp["id"], "key": bp["blueprint_key"], "trial": tid, "values": vals}
     url = f"{agents_base()}/optimizations/{opt_id}/trials/{tid}/promote"
     body = {
-        "name": f"RED pump (w {vals['window_size']}, step {vals['step_size']}, {vals['metric']})",
+        "name": name or f"RED pump (w {vals['window_size']}, step {vals['step_size']}, {vals['metric']})",
         "description": f"Promoted from {opt_id}; prototypes from normal rows 0-8,191 and incidents #1-#2."}
     # the platform's key unless one is asked for: choosing it needs the admin role outside projects
     bp = request("POST", url, body={**body, "blueprint_key": key} if key else body)

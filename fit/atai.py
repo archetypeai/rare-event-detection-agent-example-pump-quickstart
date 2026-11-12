@@ -32,6 +32,52 @@ SEARCH = {"window_size": "64", "step_size": "1", "metric": "cosine,l1,l2,dot", "
 PRIMARY = "event.foreground_macro_f1"
 
 
+PROJECT = "RED pump quickstart"
+BASE_KEY = "red-pump"            # promoted trials default to <BASE_KEY>-<trial id>, the key fit/test.py chooses
+
+
+def base_blueprint() -> dict:
+    """The quickstart's project and its copy of the canonical `red` blueprint.
+
+    Everything after it lives in the project: an optimization lands in its
+    blueprint's project, and so do the blueprints it promotes, their packages,
+    deployments and sessions. A deployment needs one, and the canonical `red` is
+    outside any, while POST /optimizations takes no project_id. Copying needs no
+    admin role. An existing project of that name, and an existing copy under
+    BASE_KEY in it, are reused.
+
+    Writes fit/out/project_state.json; returns {project, id, key}.
+    """
+    path = state_path("project")
+    state = load_state(path)
+    if "project" not in state:
+        found, after = [], ""
+        while True:                                  # every page: the cursor is opaque, passed back as is
+            page = request("GET", f"{api_base()}/projects?limit=1000{after}")
+            found += [p for p in page.get("data", []) if p["name"] == PROJECT]
+            if not page.get("has_more"):
+                break
+            after = f"&after={page['next_cursor']}"
+        state["project"] = found[0]["id"] if found else request(
+            "POST", f"{api_base()}/projects", body={
+                "name": PROJECT, "description": "Rare Event Detection agent on pump breakdowns"})["id"]
+        save_state(path, state)
+        log(f"project {state['project']} ({PROJECT})")
+    if "base" not in state:
+        found = [b for b in request("GET", f"{agents_base()}/blueprints?project_id={state['project']}&key={BASE_KEY}")["data"]
+                 if b.get("blueprint_key") == BASE_KEY]   # never a blueprint promoted from it
+        if found:
+            bp = found[0]
+            log(f"reusing {BASE_KEY} in {state['project']} ({bp['id']})")
+        else:
+            bp = request("POST", f"{agents_base()}/blueprints/red/copy",
+                         body={"project_id": state["project"], "blueprint_key": BASE_KEY})
+            log(f"copied red into {state['project']} as {BASE_KEY} ({bp['id']})")
+        state["base"] = {"id": bp["id"], "key": bp["blueprint_key"]}
+        save_state(path, state)
+    return {"project": state["project"], **state["base"]}
+
+
 def load_dotenv() -> None:
     """The repo's .env, wherever the script is run from."""
     red_api.load_dotenv(str(REPO / ".env"))
@@ -119,8 +165,39 @@ def load_state(path: Path) -> dict:
     was = state.get("endpoint")
     if was and deployment(was) != deployment(api_base()):
         sys.exit(f"{path} is from {was}, not {api_base()}: move it aside")
+    check_run_is_yours()
     state["endpoint"] = api_base()
     return state
+
+
+_RUN_CHECKED = False
+
+
+def check_run_is_yours() -> None:
+    """Exit when fit/out/ records a run in a project this key can't see.
+
+    A clone carries this repo's own run in fit/out/: its project, uploads,
+    optimizations and blueprints belong to the account that made them, and
+    answer 404 to anyone else's key. Every stage would then resume or reuse
+    those ids, so stop before the first one does."""
+    global _RUN_CHECKED
+    if _RUN_CHECKED:
+        return
+    _RUN_CHECKED = True
+    recorded = state_path("project")
+    if not recorded.exists():
+        return
+    saved = json.loads(recorded.read_text())
+    if not saved.get("project") or deployment(saved.get("endpoint", "")) != deployment(api_base()):
+        return
+    try:
+        request("GET", f"{api_base()}/projects/{saved['project']}")
+    except SystemExit as e:
+        if "(404)" not in str(e):
+            raise
+        sys.exit(f"fit/out/ records a run in project {saved['project']}, which this API key can't see "
+                 "(it is this repo's run, or another account's). Move fit/out/ and eval_out/ aside, "
+                 "then rerun: Stage 4 finds or creates your own project.")
 
 
 def save_state(path: Path, state: dict) -> None:

@@ -1,54 +1,63 @@
 #!/usr/bin/env python3
-"""Clean up: delete the agents and bundles the platform path left on the platform.
+"""Clean up: delete the sessions, deployments and packages the platform path left on the platform.
 
     python3 fit/cleanup.py            # list what would be deleted, and what stays
     python3 fit/cleanup.py --yes      # delete it
 
-What it deletes, from the ids the stages recorded in fit/out/:
+It starts from the packages the stages recorded in fit/out/:
 
-  Stage 9   the serving bridge's agents and bundle, if app-serving/ was killed
-            before it could delete them (app_serving_state.json; the bundle's
-            listing also finds an agent it replaced), and the 3 batch agents and
-            bundle of fit/library_embeddings.py (library_state.json; the view is
-            already in app-serving/static/).
-  Stage 8   a serving agent and its bundle, if fit/serve.py was killed before
-            it could delete them (serve_state.json). A running serving agent
-            holds one of dev's 3 serving workers until it is cancelled or idle
-            20 min.
-  Stage 6   the delivery agents and their bundle (deliver_state.json). The
-            state holds each file's last attempt; the bundle's own listing also
-            finds the attempts a rerun replaced. The outputs are already in
+  Stage 9   the serving bridge's, if app-serving/ was killed before it could
+            delete them (app_serving_state.json), and fit/library_embeddings.py's
+            (library_state.json; the view is already in app-serving/static/).
+  Stage 8   fit/serve.py's, if it was killed before it could delete them
+            (serve_state.json). A serving deployment holds a serving worker
+            until it is stopped.
+  Stage 6   the delivery's (deliver_state.json). The outputs are already in
             eval_out/delivery/.
 
-Agents go first (a bundle that still has an agent answers 409), a running one is
-cancelled before it is deleted, and an id already gone counts as done. Progress
-goes to fit/out/cleanup_state.json, so a rerun picks up where it stopped.
+For each package, the platform's own listings (GET /agents/deployments?package_id=,
+then GET /agents/sessions?deployment_id=) give its deployments and their sessions,
+so ones a stage never recorded, or a rerun replaced, are found too.
 
-What stays: the promoted blueprint, and the optimizations and eval the README
-cites. A served copy (`<key>-served-records`) is deleted too if an earlier
-version of fit/serve.py or the bridge made one; they serve the promoted
-blueprint itself now.
-After a cleanup, rerunning fit/deliver.py needs fit/out/deliver_state.json moved
-aside, since its bundle is gone.
+Sessions go first, then deployments, then the package: each holds the next. A
+session still going is cancelled, and a deployment still up stopped, before it is
+deleted; an id already gone counts as done. Progress goes to
+fit/out/cleanup_state.json, so a rerun picks up where it stopped.
+
+What stays: the project, its copy of `red`, the promoted blueprints (Stage 5's and
+the embeddings one), and the optimizations and eval the README cites. After a
+cleanup, rerunning fit/deliver.py needs fit/out/deliver_state.json moved aside,
+since its package is gone.
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
-from atai import TERMINAL, agents_base, load_dotenv, load_state, log, request, save_state, state_path
-from red_api import iter_instances
+from atai import load_dotenv, load_state, log, request, save_state, state_path
+from red_api import end, lifecycle_url, list_ids
 
-STAGES = {"app": "Stage 9", "serve": "Stage 8", "deliver": "Stage 6"}
+STAGES = {"app_serving": "Stage 9", "library": "Stage 9", "serve": "Stage 8", "deliver": "Stage 6"}
+KINDS = ("sessions", "deployments", "packages")
 
 
-def call(method: str, path: str, body=None):
-    """None when the object is already gone."""
+def targets(packages: list, deployments_of, sessions_of) -> list:
+    """(stage, kind, id) to delete, each session before its deployment and each
+    deployment before its package. `packages` is [(stage, package id)]."""
+    out = []
+    for stage, pkg in packages:
+        dpls = deployments_of(pkg)
+        out += [(stage, "sessions", s) for d in dpls for s in sessions_of(d)]
+        out += [(stage, "deployments", d) for d in dpls] + [(stage, "packages", pkg)]
+    return out
+
+
+def exists(pkg: str) -> bool:
     try:
-        return request(method, f"{agents_base()}{path}", body=body, raw=method == "DELETE")
+        return bool(request("GET", lifecycle_url("packages", pkg)))
     except SystemExit as e:
         if "(404)" in str(e):
-            return None
+            return False
         raise
 
 
@@ -58,47 +67,25 @@ def main() -> int:
     args = ap.parse_args()
     load_dotenv()
 
-    bridge = load_state(state_path("app_serving"))
-    library = load_state(state_path("library"))
-    serve = load_state(state_path("serve"))
-    deliver = load_state(state_path("deliver"))
-    test = load_state(state_path("test"))
-    targets = []                                   # (stage, kind, id), agents before their bundle
-    if bridge.get("bundle"):
-        agents = set(bridge.get("agents") or []) | ({bridge["agent"]} if bridge.get("agent") else set())
-        agents |= {r["id"] for r in iter_instances(bridge["bundle"])}
-        targets += [(STAGES["app"], "instances", a) for a in sorted(agents)]
-        targets += [(STAGES["app"], "bundles", bridge["bundle"])]
-    if library.get("bundle"):
-        targets += [(STAGES["app"], "instances", a) for a in sorted(set(library.get("agents", {}).values()))]
-        targets += [(STAGES["app"], "bundles", library["bundle"])]
-    if serve.get("bundle"):
-        # a /run rejected after the instance was created (400) leaves an agent the
-        # state file never recorded, and it still holds the bundle
-        agents = {serve["agent"]} if serve.get("agent") else set()
-        agents |= {r["id"] for r in iter_instances(serve["bundle"])}
-        targets += [(STAGES["serve"], "instances", a) for a in sorted(agents)]
-        targets += [(STAGES["serve"], "bundles", serve["bundle"])]
-    if deliver.get("bundle"):
-        agents = set(deliver.get("agents", {}).values())
-        agents |= {r["id"] for r in iter_instances(deliver["bundle"])}
-        targets += [(STAGES["deliver"], "instances", a) for a in sorted(agents)]
-        targets += [(STAGES["deliver"], "bundles", deliver["bundle"])]
-
+    found = {name: load_state(state_path(name)) for name in STAGES}
+    for name, st in found.items():
+        if st.get("bundle"):
+            sys.exit(f"{state_path(name)} holds bundle ids from before packages: delete them with the bundle-era fit/cleanup.py")
+    packages = [(STAGES[n], st["package"]) for n, st in found.items() if st.get("package") and exists(st["package"])]
+    todo_all = targets(packages, lambda p: list_ids("deployments", package_id=p),
+                       lambda d: list_ids("sessions", deployment_id=d))
     done_path = state_path("cleanup")
     done = load_state(done_path)
     gone = set(done.get("deleted", []))
-    todo = [t for t in targets if t[2] not in gone]
-    for stage in STAGES.values():
+    todo = [t for t in todo_all if t[2] not in gone]
+    for stage in ("Stage 9", "Stage 8", "Stage 6"):
         mine = [t for t in todo if t[0] == stage]
-        print(f"{stage}: {sum(t[1] == 'instances' for t in mine)} agent(s), "
-              f"{sum(t[1] == 'bundles' for t in mine)} bundle(s) to delete")
-    print(f"already deleted: {len(gone & {t[2] for t in targets})}")
-    bp = test.get("blueprint", {}).get("key")
-    if bp:
-        print(f"also deletes: blueprint {bp}-served-records, if an earlier version made one")
-        print(f"stays: blueprint {bp}, optimization {test.get('optimization')} "
-              f"and eval {test.get('eval')}")
+        print(f"{stage}: " + ", ".join(f"{sum(t[1] == k for t in mine)} {k}" for k in KINDS) + " to delete")
+    print(f"already deleted: {len(gone & {t[2] for t in todo_all})}")
+    test = load_state(state_path("test"))
+    if test.get("blueprint"):
+        print(f"stays: blueprint {test['blueprint']['key']}, the embeddings blueprint, optimization "
+              f"{test.get('optimization')} and eval {test.get('eval')}, and the project with its copy of red")
     if not args.yes:
         print("\nnothing deleted: rerun with --yes")
         return 0
@@ -106,37 +93,30 @@ def main() -> int:
     stuck = []
     for k, (stage, kind, obj) in enumerate(todo, 1):
         try:
-            if kind == "instances":
-                info = call("GET", f"/instances/{obj}")
-                if info and info.get("status") not in TERMINAL:
-                    call("POST", f"/instances/{obj}/cancel", body={})
-            call("DELETE", f"/{kind}/{obj}")
+            end(kind, obj)
             gone.add(obj)
         except SystemExit as e:
-            # keep going: one object that will not delete used to strand every
-            # object behind it, including whole stages further down the list
+            # keep going: one object that will not delete must not strand the rest
             stuck.append((kind, obj, str(e).splitlines()[0][:200]))
         if k % 25 == 0 or k == len(todo):
             done["deleted"] = sorted(gone)
             save_state(done_path, done)
             log(f"deleted {k - len(stuck)}/{len(todo)}")
 
-    # a served copy from an earlier version, if any (a 404 counts as done)
-    if bp and not any(kind == "bundles" for kind, _, _ in stuck):
-        try:
-            call("DELETE", f"/blueprints/{bp}-served-records")
-        except SystemExit as e:
-            stuck.append(("blueprints", f"{bp}-served-records", str(e).splitlines()[0][:200]))
-
     if stuck:
         print(f"\n{len(stuck)} object(s) would not delete:")
         for kind, obj, why in stuck:
             print(f"  {kind}/{obj}: {why}")
-        print("an agent holds its bundle, and a bundle holds its blueprint: "
+        print("a session holds its deployment, and a deployment its package: "
               "delete what holds them, then rerun")
-    for kind, st in (("serve", serve), ("app_serving", bridge)):
-        if st.get("bundle"):
-            state_path(kind).unlink()
+        return 1
+    for name in ("serve", "app_serving"):
+        if found[name].get("package"):
+            state_path(name).unlink()
+    lib = found["library"]
+    if lib.get("package"):                # keep the embeddings blueprint for a rerun and the bridge
+        save_state(state_path("library"),
+                   {k: v for k, v in lib.items() if k not in ("package", "deployment", "sessions")})
     log("done")
     return 0
 

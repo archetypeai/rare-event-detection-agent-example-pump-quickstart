@@ -1,9 +1,6 @@
 {
  "endpoint": "https://platform.u1.archetypeai.app/api",
- "blueprint": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
- "bundle": "bnd_09ka9a67m58za8xt2sg4qbjek0",
- "agents": {
-  "inc07": "agt_2mknssxj1r96097cmq96dfb6ag",
-  "inc04": "agt_04jyz32d6e9vssvc83hcerbnxw"
- }
+ "blueprint": "red-pump-otr_0s9wtj5x149mtbed03m24yda7x",
+ "package": "pkg_03sswer1xe96jrh57tn3yfans7",
+ "deployment": "dpl_52f3g2w92q9bfrs637rt45nsr9"
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal stdlib-only client for the Archetype AI Agent API.
+"""Minimal stdlib-only client for the Archetype AI Agents API (Agent Lifecycle 2.0).
 
 Shared by fit/ and prep/. Auth and endpoint come from the environment, with a local .env loaded if
 present: ATAI_API_KEY, ATAI_API_ENDPOINT.
@@ -7,6 +7,7 @@ present: ATAI_API_KEY, ATAI_API_ENDPOINT.
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import os
 import re
@@ -25,7 +26,10 @@ def load_dotenv(path: str = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]                 # KEY="value" or KEY='value'
+        os.environ.setdefault(key.strip(), value)
 
 
 def api_base() -> str:
@@ -67,36 +71,145 @@ def agents_base() -> str:
     return f"{api_base()}/agents"
 
 
-def bundles_url(bundle_id: str | None = None, suffix: str = "") -> str:
-    """URL for the bundles collection, one bundle, or a sub-path of one.
+TERMINAL = {"completed", "failed", "cancelled"}
 
-    The collection is PLURAL; `run` stays singular. Every bundle URL in this
-    repo goes through here so a rename is one edit.
 
-      POST /agents/bundles              create a bundle
-      GET  /agents/bundles/{id}         re-read a bundle
-      POST /agents/bundles/{id}/run     start a run
-      GET  /agents/bundles?limit=1      200 {data, has_more, next_cursor}
+def lifecycle_url(kind: str, obj_id: str | None = None, suffix: str = "") -> str:
+    """URL for `packages`, `deployments` or `sessions`, one of them, or a sub-path of one.
 
-    There is no `/agents/bundles/{id}/runs`. To list a bundle's runs, filter
-    GET /agents/instances by bundle_id — see iter_instances(), and note that
-    endpoint paginates.
+    The lifecycle: a blueprint in a project is packaged (its models resolved once,
+    no values), the package deployed as `batch` or `serving`, and work runs in
+    sessions on a deployment. Every lifecycle URL in this repo goes through here.
     """
-    url = f"{agents_base()}/bundles"
-    if bundle_id:
-        url = f"{url}/{bundle_id}"
+    url = f"{agents_base()}/{kind}"
+    if obj_id:
+        url = f"{url}/{obj_id}"
     return f"{url}{suffix}"
 
 
-def request(method: str, url: str, body=None, headers=None, raw: bool = False,
-            retries: int = 4):
-    """Call the API, retrying transient network failures.
+def _wait_for(kind: str, obj_id: str, want: str, waiting: str, timeout_s: int = 600, every_s: int = 3,
+              exit: bool = True) -> dict:
+    t0 = time.time()
+    while True:
+        obj = request("GET", lifecycle_url(kind, obj_id))
+        if obj["status"] == want:
+            return obj
+        if obj["status"] != waiting or time.time() - t0 > timeout_s:
+            if exit:
+                sys.exit(f"{obj_id} is {obj['status']}, not {want}: {obj.get('error')}")
+            return obj
+        time.sleep(every_s)
 
-    Polls run for hours, and a single DNS hiccup or socket timeout used to kill
-    the whole client while the platform job carried on running unattended — the
-    job then finished with nobody to download its output. Only *network* errors
-    retry; an HTTP status is a real answer from the server and still exits.
+
+def create_package(blueprint_id: str, name: str) -> dict:
+    """Package one blueprint for the platform; it starts `building`. It pins the
+    blueprint and the models it resolves to (the Omega encoder, the fitted prototypes)
+    and carries no values: it runs the blueprint exactly as promoted. Record its id
+    before `package_ready`, so a build that fails or is interrupted can still be deleted."""
+    return request("POST", lifecycle_url("packages"),
+                   body={"blueprint_ids": [blueprint_id], "target": {"kind": "platform"}, "name": name})
+
+
+def package_ready(package_id: str) -> dict:
+    return _wait_for("packages", package_id, "ready", "building", every_s=5)
+
+
+def ready_package(state: dict, blueprint_id: str, name: str, save, log=print) -> dict:
+    """state["package"] once ready, created (and saved) first if there is none. A failed
+    package never becomes ready, so it is deleted and built again, once: a rerun after a
+    failed build doesn't stop on the same package."""
+    for attempt in range(2):
+        if not state.get("package"):
+            state["package"] = create_package(blueprint_id, name)["id"]
+            save()
+            log(f"package {state['package']} ({name})")
+        pkg = _wait_for("packages", state["package"], "ready", "building", every_s=5, exit=False)
+        if pkg["status"] == "ready":
+            return pkg
+        if pkg["status"] != "failed" or attempt:
+            sys.exit(f"{state['package']} is {pkg['status']}, not ready: {pkg.get('error')}")
+        log(f"{state['package']} failed ({pkg.get('error')}): deleting it and building a new one")
+        end("packages", state["package"])
+        state.pop("package")
+        state.pop("deployment", None)
+        save()
+
+
+def status_of(kind: str, obj_id: str) -> str | None:
+    """An object's status, or None once it is gone (404)."""
+    try:
+        return request("GET", lifecycle_url(kind, obj_id))["status"]
+    except SystemExit as e:
+        if "(404)" in str(e):
+            return None
+        raise
+
+
+def deploy(package_id: str, kind: str) -> dict:
+    """Deploy a ready package as `batch` (ready at once) or `serving` (the agent placed on a
+    worker and loaded, usually within seconds; it holds the worker until stopped). It
+    starts `deploying`: record its id before `deployment_ready`."""
+    return request("POST", lifecycle_url("deployments"), body={"package_id": package_id, "kind": kind})
+
+
+def deployment_ready(deployment_id: str) -> dict:
+    return _wait_for("deployments", deployment_id, "ready", "deploying")
+
+
+def open_session(deployment_id: str, file_ids: list[str] | None = None) -> dict:
+    """A batch session over `file_ids` (one output per input), or a serving session,
+    queried at /sessions/{id}/query once `running`, when none are given."""
+    body = {"deployment_id": deployment_id}
+    if file_ids:
+        body["connectors"] = {"source": [{"type": "file", "id": f, "format": "csv"} for f in file_ids]}
+    return request("POST", lifecycle_url("sessions"), body=body)
+
+
+def wait_running(session_id: str) -> dict:
+    return _wait_for("sessions", session_id, "running", "pending")
+
+
+def end(kind: str, obj_id: str) -> None:
+    """Cancel a session still going, or stop a deployment still up, then delete it; a
+    package is deleted as it is. An id already gone (404) counts as done."""
+    try:
+        obj = request("GET", lifecycle_url(kind, obj_id))
+    except SystemExit as e:
+        if "(404)" in str(e):
+            return
+        raise
+    if kind == "sessions" and obj["status"] not in TERMINAL:
+        request("POST", lifecycle_url(kind, obj_id, "/cancel"), body={}, idempotent=True)
+    if kind == "deployments" and obj["status"] not in ("stopped", "failed"):
+        request("POST", lifecycle_url(kind, obj_id, "/stop"), body={}, idempotent=True)
+    request("DELETE", lifecycle_url(kind, obj_id), raw=True)
+
+
+def list_ids(kind: str, **query: str) -> list[str]:
+    """Every id of a lifecycle list (`GET /agents/deployments?package_id=…`,
+    `GET /agents/sessions?deployment_id=…`), following the `after` cursor."""
+    out, after = [], None
+    while True:
+        url = lifecycle_url(kind) + "?" + urllib.parse.urlencode({**query, "limit": 1000})
+        if after:
+            url += f"&after={urllib.parse.quote(after)}"
+        page = request("GET", url)
+        out += [r["id"] for r in page.get("data") or []]
+        if not page.get("has_more"):
+            return out
+        after = page.get("next_cursor")
+
+
+def request(method: str, url: str, body=None, headers=None, raw: bool = False,
+            retries: int = 4, idempotent: bool | None = None):
+    """Call the API, retrying transient failures (network errors, 502/503/504) of calls that
+    are safe to repeat: GET, HEAD and DELETE, and POSTs marked idempotent (cancel, stop, a
+    serving query). A create POST never retries: a repeat could make a second object that
+    nothing records, such as a serving deployment holding a worker. Any other HTTP status
+    is the server's answer and exits.
     """
+    if not (method in ("GET", "HEAD", "DELETE") if idempotent is None else idempotent):
+        retries = 0
     data = json.dumps(body).encode() if body is not None else None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, method=method)
@@ -110,8 +223,12 @@ def request(method: str, url: str, body=None, headers=None, raw: bool = False,
                 payload = resp.read()
                 return payload if raw else json.loads(payload or b"null")
         except urllib.error.HTTPError as e:
-            sys.exit(f"{method} {url} failed ({e.code}): {e.read().decode(errors='replace')}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            if e.code not in (502, 503, 504) or attempt == retries:
+                sys.exit(f"{method} {url} failed ({e.code}): {e.read().decode(errors='replace')}")
+            print(f"  {method} {url}: HTTP {e.code}; retrying in {5 * (2 ** attempt)}s [{attempt + 1}/{retries}]")
+            time.sleep(5 * (2 ** attempt))
+            continue
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
             if attempt == retries:
                 sys.exit(f"{method} {url} failed after {retries + 1} attempts: {e}")
             wait = 5 * (2 ** attempt)
@@ -142,78 +259,32 @@ def upload_file(path: str, rename: str | None = None) -> dict:
         sys.exit(f"upload of {path} failed ({e.code}): {e.read().decode(errors='replace')}")
 
 
-def poll_agent(agent_id: str, timeout_s: int, interval_s: int = 20) -> str:
-    """Poll until terminal, streaming new audit events as they appear."""
-    agents = agents_base()
+def poll_session(session_id: str, timeout_s: int, interval_s: int = 20) -> str:
+    """Poll a batch session until it ends, streaming its events as they appear. A session
+    reaches a terminal status and carries `error`; returns the status (`pending` or
+    `running` when the timeout came first)."""
     deadline = time.time() + timeout_s
     seen: set[str] = set()
-    status = "running"
-    while status == "running" and time.time() < deadline:
+    status = "pending"
+    while status not in TERMINAL and time.time() < deadline:
         time.sleep(interval_s)
-        status = request("GET", f"{agents}/instances/{agent_id}").get("status")
-        for ev in request("GET", f"{agents}/instances/{agent_id}/events").get("data", []):
+        ses = request("GET", lifecycle_url("sessions", session_id))
+        status = ses.get("status")
+        for ev in reversed(request("GET", lifecycle_url("sessions", session_id, "/events")).get("data", [])):
             marker = f"{ev.get('created_at')}{ev.get('message')}"
             if marker not in seen:
                 seen.add(marker)
-                print(f"  [{ev.get('level', 'info')}] {ev.get('created_at', '')}  "
+                print(f"  [{ev.get('level', 'info')}] {ev.get('created_at', '')}  {session_id}: "
                       f"{ev.get('message', '')}")
-        print(f"  {time.strftime('%H:%M:%S')} status={status}")
+        if ses.get("error"):
+            print(f"  {session_id}: {ses['error']}")
+        print(f"  {time.strftime('%H:%M:%S')} {session_id} status={status}")
     return status
 
 
-def iter_instances(bundle_id: str | None = None, page_size: int = 100):
-    """Yield agent instances, newest first, following the cursor to the end.
-
-    /agents/instances paginates: {data, has_more, next_cursor}. A single-page
-    fetch is the trap here — it returns HTTP 200 with a plausible-looking list,
-    so a bundle with more runs than one page silently downloads a subset and
-    nothing looks wrong.
-
-    The cursor parameter is `after`. `cursor`,
-    `next_cursor`, `starting_after` and `page_cursor` are all accepted with 200
-    and then IGNORED, returning page 1 again — so a wrong guess here is either
-    an infinite loop or a silent truncation, never an error.
-
-    The listing DOES take `bundle_id=`, and the platform validates it (a malformed
-    id answers 400), so one filtered request replaces walking the whole listing.
-    A delivery bundle answers with exactly its runs and `has_more` false. If a
-    deployment ever ignores the parameter the rows come back unfiltered, so the
-    filter is dropped the moment a row does not match and the walk continues
-    client-side.
-    """
-    after, server_side = None, bundle_id is not None
-    while True:
-        url = f"{agents_base()}/instances?limit={page_size}"
-        if server_side:
-            url += f"&bundle_id={urllib.parse.quote(bundle_id)}"
-        if after:
-            url += f"&after={urllib.parse.quote(after)}"
-        try:
-            page = request("GET", url)
-        except SystemExit:
-            if not server_side:
-                raise
-            server_side, after = False, None      # unsupported: walk it instead
-            continue
-        rows = page.get("data") or []
-        if server_side and any(r.get("bundle_id") != bundle_id for r in rows):
-            server_side, after = False, None      # ignored: the rows are everyone's
-            continue
-        for rec in rows:
-            if bundle_id is None or rec.get("bundle_id") == bundle_id:
-                yield rec
-        if not page.get("has_more") or not rows:
-            return
-        after = page.get("next_cursor") or rows[-1].get("id")
-        if not after:
-            return
-
-
 # The platform can report a run completed while its output file is still being
-# written (a known issue), so the output
-# counts as complete only once its last window ends at the input's end: within
-# one window span (an output row's finish - start) plus a minute. The same check
-# as the agent-skills RED and AD skills.
+# written, so the output counts as complete only once its last window ends at the
+# input's end: within one window span (an output row's finish - start) plus a minute.
 END_SLACK_S = 60
 OUTPUT_WAIT_S = 600
 
@@ -294,7 +365,7 @@ def artifact_status(item: dict) -> str | None:
 def complete_results(fetch, wait_s: int = ARTIFACT_WAIT_S) -> list:
     """The run's outputs, once every one reports complete.
 
-    Needs nothing but the agent id, unlike a content check, which compares the
+    Needs nothing but the session id, unlike a content check, which compares the
     output against the input and so only works for the client that produced
     the run. An absent status reads as ready, so a deployment that reports
     none is not blocked; the wait is bounded.
@@ -317,11 +388,11 @@ def complete_results(fetch, wait_s: int = ARTIFACT_WAIT_S) -> list:
         time.sleep(15)
 
 
-def download_results(agent_id: str, out_path: str, input_csv: str | None = None) -> str | None:
+def download_results(session_id: str, out_path: str, input_csv: str | None = None) -> str | None:
     """Fetch /results and save the first output to out_path; with input_csv, wait
     until the output reaches the input's end (None if it never does)."""
     def _fetch():
-        r = request("GET", f"{agents_base()}/instances/{agent_id}/results")
+        r = request("GET", lifecycle_url("sessions", session_id, "/results"))
         return r.get("data", r if isinstance(r, list) else [])
 
     items = complete_results(_fetch)
@@ -336,20 +407,20 @@ def download_results(agent_id: str, out_path: str, input_csv: str | None = None)
         print(f"  {inner.get('filename') or item.get('id')}  "
               f"({inner.get('num_bytes', '?')} bytes)")
     inner = items[0].get("data") or {}
-    ref = inner.get("ref") or item.get("ref") or item.get("url")
+    ref = inner.get("ref") or items[0].get("ref") or items[0].get("url")
     if not ref:
         print("  results carried no download ref")
         return None
 
     def save() -> None:
-        # A fitted-artifact ref is an absolute presigned S3 URL; a run-output ref
-        # is a relative platform path ("/files/download/<name>") that resolves
-        # under the /api prefix and needs the bearer token.
+        # An absolute URL, or a session output's root path ("/api/files/<fil_…>/content"),
+        # resolved against the deployment root, not against /api; it needs the bearer token.
         if ref.startswith("http"):
             with urllib.request.urlopen(ref) as resp:
                 payload = resp.read()
         else:
-            payload = request("GET", f"{api_base()}{ref}", raw=True)
+            base = api_base().removesuffix("/api") if ref.startswith("/api/") else api_base()
+            payload = request("GET", f"{base}{ref}", raw=True)
         open(out_path, "wb").write(payload)
 
     save()

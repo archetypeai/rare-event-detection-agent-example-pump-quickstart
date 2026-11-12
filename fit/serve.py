@@ -5,17 +5,17 @@
     python3 fit/serve.py --context 0 --whole     # every window of each file (inc04: ~2 h)
     python3 fit/serve.py --windows-per-query 16  # 16 consecutive windows a query
 
-fit/deliver.py runs the classifier in batch: an agent run per file, the output read
+fit/deliver.py runs the classifier in batch: a session per file, the output read
 when the run is done. Serving keeps an agent loaded and answers a window in one
 round trip, as a pump's historian would ask it every minute for the latest 64
 readings. This replays delivery files that way and checks every answer against
 the batch output for the same window:
 
-  1. a bundle of fit/test.py's promoted blueprint, as it is, at step 1 (bundle
-     values override a blueprint's): the platform supplies the serving
-     connectors when it runs a bundle in serving mode, so no served copy of the
-     blueprint is made;
-  2. that bundle run in serving mode;
+  1. a package of fit/test.py's promoted blueprint, as it is (step 1, as the
+     trial): the platform supplies the serving connectors for a serving
+     deployment, so no served copy of the blueprint is made;
+  2. that package deployed as `serving` (the agent placed on a worker and
+     loaded), and a session opened on it, queried at /agents/sessions/{id}/query;
   3. each file replayed one row at a time: every query holds the latest
      `window_size` rows (`--windows-per-query N` sends N windows at once). By
      default only the windows ending within --context rows of the breakdown;
@@ -23,7 +23,7 @@ the batch output for the same window:
      within 1e-4, and per file the detection (the first `pump_breakdown` window
      overlapping the breakdown, as fit/evaluate_events.py counts it) and the false
      alarms (`pump_breakdown` windows with no fault row), served and batch;
-  5. the agent cancelled and deleted, and the bundle deleted, however it went
+  5. the session cancelled, the deployment stopped, and all three deleted, however it went
      (Ctrl-C, SIGTERM and SIGHUP included). Their ids stay in
      fit/out/serve_state.json until then, so fit/cleanup.py finds them after a kill.
 
@@ -41,7 +41,9 @@ import time
 
 import pandas as pd
 
-from atai import REPO, ROLES, agents_base, load_dotenv, load_state, log, manifest, request, save_state, state_path
+from atai import REPO, ROLES, load_dotenv, load_state, log, manifest, request, save_state, state_path
+from red_api import (create_package, deploy, deployment_ready, end, lifecycle_url, open_session, package_ready,
+                     wait_running)
 
 MODEL = "red-pump"               # the name a query gives in `model`
 FAULT = "pump_breakdown"
@@ -72,7 +74,7 @@ def outcome(preds: list[str], ends: list[int], labels: list[str], window: int) -
 
 
 def stop(signum, _frame):
-    sys.exit(f"stopped by signal {signum}")       # so `finally` deletes the agent and bundle
+    sys.exit(f"stopped by signal {signum}")       # so `finally` ends the session and deployment
 
 
 def main() -> int:
@@ -114,21 +116,21 @@ def main() -> int:
 
     live = state_path("serve")
     state = load_state(live)
-    if state.get("bundle"):
-        sys.exit(f"{live} holds an earlier replay's agent and bundle: run fit/cleanup.py first")
-    state["bundle"] = request("POST", f"{agents_base()}/bundles", body={
-        "blueprint": bp["key"], "name": "RED serve", "values": {"step_size": 1}})["id"]
-    save_state(live, state)
+    if state.get("package") or state.get("bundle"):
+        sys.exit(f"{live} holds an earlier replay's ids: run fit/cleanup.py first")
     served, latency = {}, []
     t_start = time.time()
     try:
-        state["agent"] = request("POST", f"{agents_base()}/bundles/{state['bundle']}/run", body={"mode": "serving"})["id"]
-        save_state(live, state)
-        log(f"bundle {state['bundle']} · agent {state['agent']}")
-        while (status := request("GET", f"{agents_base()}/instances/{state['agent']}").get("status")) != "running":
-            if status in ("failed", "cancelled", "canceled", "completed") or time.time() - t_start > 600:
-                sys.exit(f"agent {state['agent']} is {status}, not running")
-            time.sleep(3)
+        # each id is recorded before waiting on it, so fit/cleanup.py can delete what fails
+        for kind, make, ready in (("package", lambda: create_package(bp["id"], "RED serve"), package_ready),
+                                  ("deployment", lambda: deploy(state["package"], "serving"), deployment_ready),
+                                  ("session", lambda: open_session(state["deployment"]), None)):
+            state[kind] = make()["id"]
+            save_state(live, state)
+            if ready:
+                ready(state[kind])
+        log(f"package {state['package']} · serving deployment {state['deployment']} · session {state['session']}")
+        wait_running(state["session"])
         for name, X, _, _, first, n in plan:
             got = served[name] = []
             for k in range(0, n, wpq):
@@ -138,7 +140,7 @@ def main() -> int:
                 body = {"model": MODEL, "query": "", "events": [{"type": "data.numeric_array",
                         "event_data": {"contents": [chunk[:, c].tolist() for c in range(len(channels))]}}]}
                 t = time.time()
-                answer = request("POST", f"{agents_base()}/instances/{state['agent']}/query", body=body)
+                answer = request("POST", lifecycle_url("sessions", state["session"], "/query"), body=body, idempotent=True)
                 latency.append(time.time() - t)
                 records = (answer.get("response") or {}).get("data")
                 if not isinstance(records, list) or len(records) != count:
@@ -146,20 +148,21 @@ def main() -> int:
                 got.extend(records)
             log(f"  {name}: {n} windows, {time.time() - t_start:.0f} s so far")
     finally:
+        handlers = {sig: signal.signal(sig, signal.SIG_IGN)   # a second signal mustn't cut the cleanup short
+                    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         done = True
-        for method, path, body in ((("POST", f"/instances/{state['agent']}/cancel", {}),
-                                    ("DELETE", f"/instances/{state['agent']}", None)) if state.get("agent") else ()) + \
-                                  (("DELETE", f"/bundles/{state['bundle']}", None),):
-            try:
-                request(method, f"{agents_base()}{path}", body=body, raw=method == "DELETE")
-            except SystemExit as e:
-                if "(404)" not in str(e):
+        for kind in ("session", "deployment", "package"):     # each tried, even when one before it fails
+            if state.get(kind):
+                try:
+                    end(f"{kind}s", state[kind])
+                except SystemExit as e:
                     log(f"cleanup: {e}; fit/cleanup.py retries it")
                     done = False
-                    break
         if done:
-            live.unlink()
-            log(f"cancelled and deleted {state.get('agent')}, deleted {state['bundle']}")
+            live.unlink(missing_ok=True)
+            log(f"ended and deleted {', '.join(state[k] for k in ('session', 'deployment', 'package') if state.get(k))}")
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
     elapsed = time.time() - t_start
 
     rows, per_file = [], []

@@ -1,9 +1,12 @@
 {
- "eval": "evl_5jvhr27th48bms6stnrkc8yvv1",
+ "evals": [
+  "evl_5djebh44688438865m2ckbb9ge"
+ ],
+ "max_windows": null,
  "blueprint": {
-  "id": "blp_2d0p62hb3q8tbavg3rydaqe8bc",
-  "key": "red-pump-otr_17eqj079pz82ka5kpeghtja7kw",
-  "trial": "otr_17eqj079pz82ka5kpeghtja7kw",
+  "id": "blp_43g532wsy18ne8xfrd0r2h1dys",
+  "key": "red-pump-otr_0s9wtj5x149mtbed03m24yda7x",
+  "trial": "otr_0s9wtj5x149mtbed03m24yda7x",
   "values": {
    "background": "normal",
    "data_columns": [
@@ -28,11 +31,11 @@
    "metric": "dot"
   }
  },
- "optimization": "opt_7sww67qwbr9vrr4drq7p2pta9v",
+ "optimization": "opt_1ptxrehg739q6rkzhgjpbzy01v",
  "platform": {
   "accuracy": 0.9823246418414268,
   "detection_precision": 0.9469953449005502,
-  "detection_recall": 0.9820076796489304,
+  "detection_recall": 0.9820076796489303,
   "foreground_macro_f1": 0.9641837668982604,
   "macro_f1": 0.9762255131885398
  },
